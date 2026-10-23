@@ -61,7 +61,11 @@
       for (let i = 0; i < width; i++, bit++) code = (code << 1) | ((input[bit >> 3] >> (7 - (bit & 7))) & 1);
       if (code === 257) break;
       if (code === 256) { width = 9; next = 258; prev = -1; continue; }
-      if (prev === -1) { write(code); prev = code; continue; }
+      if (prev === -1) {
+        if (code > 255) throw new Error('corrupt LZW data');
+        write(code); prev = code; continue;
+      }
+      if (code > next || next >= 4096) throw new Error('corrupt LZW data');
       if (code < next) {
         write(code);
         prefix[next] = prev; suffix[next] = first[code]; first[next] = first[prev]; len[next] = len[prev] + 1;
@@ -165,7 +169,9 @@
     const raw = new Uint8Array(rowBytes * h);
 
     if (tiled) {
-      const tw = t[322][0], th = t[323][0], across = Math.ceil(w / tw), need = across * Math.ceil(h / th);
+      const tw = t[322][0], th = t[323][0];
+      if (!(tw > 0 && th > 0 && tw * th <= MAX_PIXELS)) throw new Error('the TIFF file has an invalid tile size');
+      const across = Math.ceil(w / tw), need = across * Math.ceil(h / th);
       if (offsets.length < need) throw new Error('the TIFF file is missing image tiles');
       for (let i = 0; i < need; i++) {
         const tile = await decompress(new Uint8Array(buf, offsets[i], counts[i]), compression, tw * th * bpp);
@@ -177,7 +183,7 @@
         }
       }
     } else {
-      const rps = Math.min(one(278, h), h), need = Math.ceil(h / rps);
+      const rps = Math.min(one(278, h) || h, h), need = Math.ceil(h / rps);
       if (offsets.length < need) throw new Error('the TIFF file is missing image strips');
       for (let i = 0; i < need; i++) {
         const rows = Math.min(rps, h - i * rps);

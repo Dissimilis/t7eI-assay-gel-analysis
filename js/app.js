@@ -239,12 +239,12 @@
   /** Find the lanes of a row again; a new lane close to an old one keeps its role and label. */
   function redetectRow(row, keepBoundaries) {
     const d = T.detectLanes(signal(), state.img, row);
-    const old = row.lanes;
+    const old = row.lanes, used = new Set();
     row.pitch = d.pitch;
     row.lanes = d.xs.map(x => {
       const lane = newLane(x);
-      const near = old.filter(l => Math.abs(l.x - x) < d.pitch / 2).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0];
-      if (near) { lane.role = near.role; lane.label = near.label; if (keepBoundaries) lane.valleys = near.valleys; }
+      const near = old.filter(l => !used.has(l) && Math.abs(l.x - x) < d.pitch / 2).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0];
+      if (near) { used.add(near); lane.role = near.role; lane.label = near.label; if (keepBoundaries) lane.valleys = near.valleys; }
       return lane;
     });
   }
@@ -264,6 +264,7 @@
   function removeSelectedLane() {
     const s = selIndex();
     if (!s) return;
+    state.drag = null;
     const row = state.rows[s.ri];
     row.lanes.splice(s.li, 1);
     if (row.lanes.length) select(s.ri, Math.min(s.li, row.lanes.length - 1));
@@ -659,7 +660,8 @@
       const dx = pt.x - d.sx;
       if (!d.moved && Math.abs(dx) < 2) return;
       d.moved = true;
-      const lane = state.rows[d.ri].lanes.find(l => l.id === d.id);
+      const lane = state.rows[d.ri] && state.rows[d.ri].lanes.find(l => l.id === d.id);
+      if (!lane) { state.drag = null; return; }
       lane.x = Math.round(clamp(d.x0 + dx, state.rows[d.ri].x0, state.rows[d.ri].x1));
       recomputeSoon();
     } else if (d.kind === 'region') {
@@ -750,7 +752,9 @@
     }
     const lane = laneAt(d.ri, d.li), v = (lane.valleys || d.start).map(y => y - r.y0);
     const lo = d.k === 0 ? 0 : v[d.k - 1] + 1, hi = d.k === v.length - 1 ? S.n - 1 : v[d.k + 1] - 1;
-    v[d.k] = clamp(S.I(mx), lo, hi);
+    const to = clamp(S.I(mx), lo, hi);
+    if (!lane.valleys && to === v[d.k]) return;   // pointer jitter on the handle is not an edit
+    v[d.k] = to;
     lane.valleys = v.map(i => i + r.y0);
     recomputeSoon();
   });
@@ -778,8 +782,10 @@
   els.smoothing.addEventListener('input', () => { state.params.smoothing = Number(els.smoothing.value); saveParams(); recomputeSoon(); });
   els.subtractNC.addEventListener('change', () => { state.params.subtractNC = els.subtractNC.checked; saveParams(); recompute(); });
   els.resetParams.addEventListener('click', () => {
-    const pol = state.params.polarity;
-    state.params = Object.assign({}, T.DEFAULTS, { polarity: state.img ? T.detectPolarity(state.img) : pol });
+    const oldPol = state.params.polarity, oldProducts = state.params.products;
+    state.params = Object.assign({}, T.DEFAULTS, { polarity: state.img ? T.detectPolarity(state.img) : oldPol });
+    if (state.img && state.params.polarity !== oldPol) state.rows.forEach(row => redetectRow(row, false));
+    if (state.params.products !== oldProducts) state.rows.forEach(row => row.lanes.forEach(l => { l.valleys = null; }));
     saveParams();
     recompute();
   });
@@ -793,6 +799,20 @@
   els.autoRole.addEventListener('click', () => { const s = selIndex(); if (s) { laneAt(s.ri, s.li).role = null; recompute(); } });
   els.resetBands.addEventListener('click', () => { const s = selIndex(); if (s) { laneAt(s.ri, s.li).valleys = null; recompute(); } });
   els.removeLane.addEventListener('click', removeSelectedLane);
+
+  // Parameter help: hover or keyboard focus shows a tip; a click or tap pins it until Escape or a click elsewhere.
+  const infoButtons = Array.from(document.querySelectorAll('.info'));
+  const closeTips = except => infoButtons.forEach(b => { if (b !== except) b.setAttribute('aria-expanded', 'false'); });
+  infoButtons.forEach(b => {
+    b.setAttribute('aria-expanded', 'false');
+    b.addEventListener('click', e => {
+      e.stopPropagation();
+      closeTips(b);
+      b.setAttribute('aria-expanded', b.getAttribute('aria-expanded') === 'true' ? 'false' : 'true');
+    });
+  });
+  document.addEventListener('click', e => { if (!e.target.closest('.tip')) closeTips(null); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeTips(null); });
 
   els.loadBtn.addEventListener('click', () => els.fileInput.click());
   els.fileInput.addEventListener('change', () => { loadFile(els.fileInput.files[0]); els.fileInput.value = ''; });

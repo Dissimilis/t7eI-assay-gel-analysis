@@ -135,3 +135,23 @@ a:hover { color: var(--color-accent-800); }
 
 .note { margin-top: 4px; color: var(--color-accent-800); }
 .field > label.check { display: inline-flex; margin: 0; font-size: 14px; color: var(--color-text); }
+
+/* — parameter help: an info button with a tooltip on hover, focus or tap — */
+.field-head { position: relative; display: flex; align-items: center; gap: 4px; margin-bottom: 5px; }
+.field-head > label:not(.check) { font-size: 12px; margin: 0; color: color-mix(in srgb, var(--color-text) 70%, transparent); }
+.info {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; padding: 0; flex: none;
+  border: 0; background: transparent; color: var(--color-accent-700); cursor: help;
+}
+.info:hover, .info:focus-visible, .info[aria-expanded="true"] { color: var(--color-accent-900); background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.tip {
+  display: none; position: absolute; top: calc(100% + 4px); left: 0; z-index: 30;
+  width: min(330px, calc(100vw - 40px)); padding: 9px 11px;
+  font-size: 12px; line-height: 1.45; color: var(--color-text); text-transform: none; letter-spacing: 0;
+  background: var(--color-bg); border: 1px solid var(--color-divider); box-shadow: var(--shadow-md);
+}
+.tip strong { font-weight: 600; }
+.info:hover + .tip, .info:focus-visible + .tip, .info[aria-expanded="true"] + .tip { display: block; }
+.lane-tools .field-head { margin: 0; }
+.field-inline .field-head { margin: 0; }
+.lane-tools .tip { left: auto; right: 0; }

@@ -48,14 +48,14 @@
 
       <div class="controls">
         <div class="field">
-          <label>Bands</label>
+          <div class="field-head"><label>Bands</label><button type="button" class="info" aria-label="About bands" aria-describedby="tip-polarity"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-polarity">Whether DNA shows as <strong>dark bands on a light background</strong> (most imager exports and inverted photos) or <strong>light bands on dark</strong> (raw fluorescence). It is set automatically when an image loads. If it is wrong, lanes are not found and the numbers mean nothing.</span></div>
           <div class="seg" data-param="polarity">
             <label class="seg-opt"><input type="radio" name="polarity" value="dark">Dark on light</label>
             <label class="seg-opt"><input type="radio" name="polarity" value="light">Light on dark</label>
           </div>
         </div>
         <div class="field">
-          <label>Background</label>
+          <div class="field-head"><label>Background</label><button type="button" class="info" aria-label="About background" aria-describedby="tip-background"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-background">How the background under each band is removed before its area is summed. <strong>Valley</strong> (default): a straight line between the low points on both sides of each band, as drawn by hand in ImageJ. <strong>Envelope</strong>: one line under the whole lane, so smear between bands counts as band and % editing comes out a few points higher. <strong>Blend</strong>: Valley, moved towards Envelope where smear lifts the low points between bands.</span></div>
           <div class="seg" data-param="background">
             <label class="seg-opt" title="Straight line between the valleys on either side of each band, as drawn in ImageJ Gel Analyzer"><input type="radio" name="background" value="valley">Valley</label>
             <label class="seg-opt" title="Valley baseline, moved towards one line under the whole lane where smear lifts the valleys"><input type="radio" name="background" value="blend">Blend</label>
@@ -63,29 +63,29 @@
           </div>
         </div>
         <div class="field">
-          <label>Cleavage products</label>
+          <div class="field-head"><label>Cleavage products</label><button type="button" class="info" aria-label="About cleavage products" aria-describedby="tip-products"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-products">How many cleavage bands T7E1 gives for your amplicon. <strong>Two</strong> is normal. Choose <strong>One</strong> only when both fragments run together as one band. If a fragment ran off the gel, One reports too little editing.</span></div>
           <div class="seg" data-param="products">
             <label class="seg-opt"><input type="radio" name="products" value="2">Two</label>
             <label class="seg-opt"><input type="radio" name="products" value="1">One</label>
           </div>
         </div>
         <div class="field">
-          <label>Formula</label>
+          <div class="field-head"><label>Formula</label><button type="button" class="info" aria-label="About the formula" aria-describedby="tip-formula"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-formula">Turns the fraction of DNA cut into % of alleles edited. <strong>Diverse indels</strong> (Guschin 2010, NEB protocol) is the standard choice for edited pools with many different indels. <strong>Single allele</strong> is for clones or pools dominated by one edit: it gives somewhat higher values from the same gel and no value once more than half the DNA is cut.</span></div>
           <div class="seg" data-param="formula">
             <label class="seg-opt" title="100 × (1 − √(1 − fraction cleaved)), Guschin et al. 2010: a mix of different indels"><input type="radio" name="formula" value="guschin">Diverse indels</label>
             <label class="seg-opt" title="100 × (1 − √(1 − 2 × fraction cleaved)) / 2: one dominant mutant allele"><input type="radio" name="formula" value="single">Single allele</label>
           </div>
         </div>
         <div class="field">
-          <label for="laneWidth">Lane width · <span id="laneWidthVal"></span>% of pitch</label>
+          <div class="field-head"><label for="laneWidth">Lane width · <span id="laneWidthVal"></span>% of pitch</label><button type="button" class="info" aria-label="About lane width" aria-describedby="tip-laneWidth"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-laneWidth">Width of the strip measured in each lane, as a share of the distance between neighbouring lanes. The default 50% covers the band centre without touching the next lane. Wider takes in band edges and more background; narrower is noisier. It usually moves results by less than one point.</span></div>
           <input type="range" id="laneWidth" min="20" max="90" step="5" class="range">
         </div>
         <div class="field">
-          <label for="smoothing">Smoothing · σ <span id="smoothingVal"></span> px</label>
+          <div class="field-head"><label for="smoothing">Smoothing · σ <span id="smoothingVal"></span> px</label><button type="button" class="info" aria-label="About smoothing" aria-describedby="tip-smoothing"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-smoothing">Evens out pixel noise in each lane profile before bands and their boundaries are found. 1.5 px suits most photos. Higher values can merge bands that run close together; 0 lets single noisy pixels shift the boundaries.</span></div>
           <input type="range" id="smoothing" min="0" max="4" step="0.5" class="range">
         </div>
         <div class="field field-inline">
-          <label class="check"><input type="checkbox" id="subtractNC"><span class="box"></span>Subtract NC background</label>
+          <div class="field-head"><label class="check"><input type="checkbox" id="subtractNC"><span class="box"></span>Subtract NC background</label><button type="button" class="info" aria-label="About NC subtraction" aria-describedby="tip-subtractNC"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-subtractNC">Subtracts the fraction cut in the uncut control lanes (role NC) from every sample before the formula. This removes background cutting by T7E1 that is not caused by editing. It needs at least one lane set to NC and lowers every sample slightly.</span></div>
           <button class="btn btn-ghost" id="resetParams" type="button">Reset defaults</button>
         </div>
       </div>
@@ -114,6 +114,7 @@
           <label class="seg-opt"><input type="radio" name="role" value="marker">Marker</label>
           <label class="seg-opt"><input type="radio" name="role" value="excluded">Exclude</label>
         </div>
+        <div class="field-head"><button type="button" class="info" aria-label="About lane roles" aria-describedby="tip-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-role"><strong>Sample</strong>: quantified. <strong>NC</strong>: uncut control, used by NC subtraction. <strong>Marker</strong>: DNA ladder, not quantified. <strong>Exclude</strong>: ignored. <strong>Auto role</strong> gives the decision back to the analysis.</span></div>
         <button class="btn btn-ghost" id="autoRole" type="button" title="Let the analysis decide the role">Auto role</button>
         <button class="btn btn-ghost" id="resetBands" type="button">Reset bands</button>
         <button class="btn btn-ghost" id="removeLane" type="button">Remove lane</button>
@@ -153,7 +154,7 @@
       </div>
       <div>
         <h5>Measurement</h5>
-        <p>Each lane is a vertical strip (default half the lane pitch). Its mean profile is smoothed, the parent band is the strongest peak, and the cleavage products are found at offsets shared by the lanes of the row, measured from each lane's own parent band, so tilted rows work. Areas are summed above a straight baseline between the valleys around each band, the way ImageJ Gel Analyzer is used by hand.</p>
+        <p>Each lane is a vertical strip (default half the lane pitch). Its mean profile is smoothed, the parent band is the uppermost strong peak (above about 37% editing a cleavage product is brighter than the parent), and the cleavage products are found at offsets shared by the lanes of the row, measured from each lane's own parent band, so tilted rows work. Areas are summed above a straight baseline between the valleys around each band, the way ImageJ Gel Analyzer is used by hand.</p>
       </div>
       <div>
         <h5>Checks</h5>
