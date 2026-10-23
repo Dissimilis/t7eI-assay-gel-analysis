@@ -255,6 +255,8 @@ test('bands cut by the box edge are flagged', () => {
 test('very high editing (70-80%) finds the faint parent above the products', () => {
   const row = analyseBox(bandGel(fourLanes([70, 75, 80, 70]), { w: 500 }), { x0: 0, x1: 500, y0: 5, y1: 135 });
   [70, 75, 80, 70].forEach((ed, i) => assert.ok(Math.abs(row.lanes[i].editing - ed) <= 2, `lane ${i}: ${row.lanes[i].editing} vs ${ed}`));
+  const higher = analyseBox(bandGel(fourLanes([82, 84, 87, 82]), { w: 500 }), { x0: 0, x1: 500, y0: 5, y1: 135 });
+  [82, 84, 87, 82].forEach((ed, i) => assert.ok(Math.abs(higher.lanes[i].editing - ed) <= 2, `lane ${i}: ${higher.lanes[i].editing} vs ${ed}`));
 });
 
 test('One-product mode with a faint parent above is flagged', () => {
@@ -397,4 +399,45 @@ test('One-product mode measures the end lanes too', () => {
   const row = T.analyze(img, [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null })) })], { polarity: 'dark', products: 1 }).rows[0];
   row.lanes.forEach((l, i) => assert.equal(l.role, 'sample', 'lane ' + i));
   assertNotSilent(row, [25, 25, 25, 25], 'one product');
+});
+
+function analyseWith(img, box, bandsOf) {
+  const sig = T.signalImage(img, 'dark');
+  const d = T.detectLanes(sig, img, box);
+  return T.analyze(img, [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map((x, i) => ({ x, role: null, bands: bandsOf(i) })) })], { polarity: 'dark' }).rows[0];
+}
+
+test('a band chosen as a product is never also the automatic parent', () => {
+  const img = bandGel(fourLanes(20), { w: 500 });
+  const row = analyseWith(img, { x0: 0, x1: 500, y0: 5, y1: 135 }, i => (i === 1 ? { parent: null, products: [null, 30], removed: [] } : null));
+  const l = row.lanes[1], ys = l.peaks.map(y => y + l.y0);
+  assert.notEqual(ys[0], 30, 'parent');
+  assertNotSilent(row, [20, 20, 20, 20], 'product chosen at the parent');
+});
+
+test('removing a band in a ladder-like lane does not change its neighbours', () => {
+  const t70 = t7Bands(70).map(([y, m]) => [y === 30 ? 30 : y === 60 ? 70 : 115, m]);
+  const lanes = [{ x: 60, bands: t70 }, { x: 160, bands: [[30, 0.8], [60, 0.16], [95, 0.16], [140, 0.16]] }, { x: 260, bands: t70 }];
+  const img = bandGel(lanes, { w: 400, h: 190 }), box = { x0: 0, x1: 400, y0: 5, y1: 185 };
+  const before = analyseWith(img, box, () => null), after = analyseWith(img, box, i => (i === 1 ? { parent: null, products: [null, null], removed: [30] } : null));
+  [0, 2].forEach(i => assert.equal(after.lanes[i].editing, before.lanes[i].editing, 'lane ' + i));
+});
+
+test('a strong removed artefact above the parent: neither its flank nor its tail is measured', () => {
+  const img = bandGel([{ x: 60, bands: [[20, 1.5]].concat(t7Bands(20).map(([y, m]) => [y + 20, m])) }], { w: 200, h: 190 });
+  const box = { x0: 0, x1: 200, y0: 5, y1: 185 };
+  for (const b of [{ parent: null, products: [null, null], removed: [20] }, { parent: 50, products: [80, 115], removed: [20] }]) {
+    const l = analyseWith(img, box, () => b).lanes[0];
+    assert.deepEqual(l.peaks.map(y => y + l.y0), [50, 80, 115]);
+    assert.ok(Math.abs(l.editing - 20) <= 1, `${JSON.stringify(b)}: ${l.editing}`);
+    assert.ok(!l.flags.includes('band above the parent'), 'removed band is not flagged as a band above');
+  }
+});
+
+test('a removed band where a product was expected is still left out', () => {
+  const p = 0.4, fc = 1 - (1 - p) ** 2, B = [[40, 1 - fc], [90, fc * 2 / 3], [140, fc / 3]];
+  const lanes = [60, 160, 260, 360, 460, 560].map(x => ({ x, bands: B }));
+  const row = analyseWith(bandGel(lanes, { w: 650, h: 190 }), { x0: 0, x1: 650, y0: 5, y1: 185 }, i => (i === 3 ? { parent: null, products: [null, null], removed: [90] } : null));
+  const l = row.lanes[3], ref = row.lanes[2];
+  assert.ok(Math.abs(l.areas[2] - ref.areas[2]) < 0.05 * ref.areas[2], `product 2 area ${l.areas[2]} vs ${ref.areas[2]}`);
 });

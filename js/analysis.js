@@ -413,24 +413,27 @@
       const noise = Math.max(1e-3, noiseSigma(p));
       const ov = laneOverrides(lane, ps, r.y0);
       const near = i => ov.removed.some(j => Math.abs(j - i) <= 3);
-      // A removed band cannot be the parent either (for example a heteroduplex taken as parent).
+      // Neither a removed band (for example a heteroduplex taken as parent) nor a band chosen by hand as a
+      // product can be the automatic parent; the flank of a removed band is not a peak either.
+      const notParent = i => near(i) || ov.products.some(j => j != null && Math.abs(j - i) <= 3);
       let top = -1;
-      for (let i = 0; i < n; i++) if (!near(i) && (top < 0 || ps[i] > ps[top])) top = i;
+      for (let i = 1; i < n - 1; i++) if (!notParent(i) && isLocalMax(ps, i) && (top < 0 || ps[i] > ps[top])) top = i;
       if (top < 0) top = argmax(ps, 0, n - 1);
-      const P = ov.parent != null ? ov.parent : parentIndex(ps, top, n, noise, near);
+      const P = ov.parent != null ? ov.parent : parentIndex(ps, top, n, noise, notParent);
       const q = { lane, p, ps, a, b, P, noise, ov, parentFixed: ov.parent != null, isEnd: false, products: prm.products,
         cands: productCandidates(ps, P, noise).filter(c => !near(P + c.off)) };
       // The row votes with each lane's automatic bands, so a band removed in one lane does not move the others.
       const autoTop = argmax(ps, 0, n - 1), autoP = parentIndex(ps, autoTop, n, noise);
       q.voteCands = productCandidates(ps, autoP, noise);
       // The uppermost faint band below the well zone: the parent when editing is high enough that it
-      // falls under the cut parentIndex uses (about 65% and above).
+      // falls under the cut parentIndex uses (about 65% and above; found up to about 87%).
       const reach = Math.max(10, Math.round(n / 4)), ref = prominence(ps, autoTop, reach), well = Math.max(3, 0.08 * n);
       for (let j = Math.ceil(well); j < autoP - 4; j++) {
-        if (isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.05 * ref)) { q.faintCands = productCandidates(ps, j, noise); break; }
+        if (isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.02 * ref)) { q.faintP = j; q.faintCands = productCandidates(ps, j, noise); break; }
       }
       // A ladder has more strong bands than parent plus two products; keep it out of the vote.
-      q.ladderLike = !lane.role && strongPeaks(ps, P, n).length >= 4;
+      // Judged on the automatic bands, like the vote, so a removal does not take a lane in or out of it.
+      q.ladderLike = !lane.role && strongPeaks(ps, autoP, n).length >= 4;
       return q;
     });
     pre.forEach((q, i) => { q.isEnd = i === 0 || i === pre.length - 1; q.rowLanes = pre.length; });
@@ -552,9 +555,10 @@
     const top = argmax(ps, 0, n - 1);
     const ref = prominence(ps, top, reach);
     const removed = j => q.ov && q.ov.removed.some(x => Math.abs(x - j) <= 3);
-    const cands = [q.P].concat(removed(top) ? [] : [top]);
+    const hand = j => removed(j) || (q.ov && q.ov.products.some(x => x != null && Math.abs(x - j) <= 3));
+    const cands = [q.P].concat(hand(top) ? [] : [top], q.faintP != null && !hand(q.faintP) ? [q.faintP] : []);
     for (let j = 1; j < n - 1; j++) {
-      if (j !== q.P && j !== top && !removed(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.05 * ref)) cands.push(j);
+      if (j !== q.P && j !== top && !hand(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.05 * ref)) cands.push(j);
     }
     // Score: products found at the shared offsets; then fewer strong bands below the parent left
     // unexplained (a well or smear taken as parent leaves the real product 2 over); then a closer fit.
@@ -612,14 +616,17 @@
       let l = m, r = m;
       while (l > 0 && ps[l - 1] < ps[l]) l--;
       while (r < n - 1 && ps[r + 1] < ps[r]) r++;
-      const floor = Math.max(ps[l], ps[r]) - (Math.abs(ps[l] - ps[r]) / 2);
+      const floor = Math.min(ps[l], ps[r]);   // the lower flank: the other may be cut by the box or lifted by a neighbour
       const amp = ps[m] - floor;
       if (!(amp > 0)) return;
       const half = floor + amp / 2;
       let a = m, b = m;
       while (a > l && ps[a] > half) a--;
       while (b < r && ps[b] > half) b++;
-      const hw = Math.max(1, Math.min(m - a, b - m));   // the side not lifted by a neighbour
+      // Half-maximum crossings interpolated between pixels; the side not lifted by a neighbour sets the width.
+      const left = a < m && ps[a] <= half ? a + (half - ps[a]) / (ps[a + 1] - ps[a]) : a;
+      const right = b > m && ps[b] <= half ? b - (half - ps[b]) / (ps[b - 1] - ps[b]) : b;
+      const hw = Math.max(1, Math.min(m - left, right - m));
       const sigma = hw / 1.1774;
       for (let i = Math.max(0, Math.floor(m - 5 * sigma)); i <= Math.min(n - 1, Math.ceil(m + 5 * sigma)); i++) {
         out[i] -= amp * Math.exp(-((i - m) ** 2) / (2 * sigma * sigma));
@@ -698,7 +705,7 @@
     // An undetected product only marks where it was expected; when that spot is another band it gets no segment.
     const collides = (y, i) => peaks.some((o, j) => j !== i && Math.abs(o - y) <= 3) || nearRemoved(y);
     const bands = peaks.map((y, i) => ({ y, kind: i })).filter(b => b.kind === 0 || prods[b.kind - 1].found || !collides(b.y, b.kind))
-      .concat(ov.removed.filter(y => y > P - above && y < lowest + below && !peaks.some(p => Math.abs(p - y) <= 2)).map(y => ({ y, kind: -1 })))
+      .concat(ov.removed.filter(y => y > P - above && y < lowest + below && !peaks.some((p, i) => (i === 0 || prods[i - 1].found) && Math.abs(p - y) <= 2)).map(y => ({ y, kind: -1 })))
       .sort((a, b) => a.y - b.y || a.kind - b.kind);
     const ys = bands.map(b => b.y);
     const removedIn = bands.filter(b => b.kind < 0).map(b => b.y);
@@ -791,7 +798,7 @@
       }
       const ref = prominence(ps, argmax(ps, 0, n - 1), reach);
       for (let j = 1; j < P - 4; j++) {
-        if (isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.05 * ref)) { flags.push('band above the parent'); break; }
+        if (!nearRemoved(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.05 * ref)) { flags.push('band above the parent'); break; }
       }
       if (q.extraBand) flags.push('extra band not matching the cleavage products');
     }
