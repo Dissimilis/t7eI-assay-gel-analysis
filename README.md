@@ -10,8 +10,8 @@ Densitometry for T7 endonuclease I (T7E1) mismatch-cleavage assays. Load a photo
 
 1. Open the app and press **Load image**, or drop a PNG, JPEG or TIFF onto the image area. Pasting from the clipboard works too.
 2. Drag a box over one row of bands. Include the parent band and both cleavage products with a little background above and below, and leave the wells out. The app finds the loaded lanes, recognises the ladder and skips empty wells. Repeat for every row of the gel.
-3. Check the results table and the lane profile. Remove lanes you don't need (**Remove lane** or Delete) and give lanes your own labels. Every setting has an ⓘ button that explains what it does.
-4. Export the numbers as **CSV**, or an annotated **Figure PNG** with % editing under every lane.
+3. Check the results table and the lane profile. If a lane picked the wrong band, **click the peak on the profile**: a small menu lets you remove that band (its area is then left out and it is never taken as a product) or use it as the parent, product 1 or product 2. **Reset bands** undoes this for the lane. Remove lanes you don't need (**Remove lane** or Delete) and give lanes your own labels. Every setting has an ⓘ button that explains what it does.
+4. Export the numbers as an **Excel workbook** (results plus a sheet with the settings used), as **CSV**, or as an annotated **Figure PNG** with % editing under every lane.
 
 **Sample gel** loads a synthetic gel with known values, so you can try every control without your own data.
 
@@ -32,10 +32,10 @@ The pipeline for each row:
 
 - **Lanes.** The lane pitch comes from the autocorrelation of the row's column profile. Lane centres are the half-maximum midpoints of the peaks above a rolling-ball background. Empty wells produce no peak and are skipped.
 - **Profiles.** Each lane is a vertical strip, half the lane pitch wide by default. Its mean signal per pixel row is smoothed with a Gaussian (σ 1.5 px).
-- **Bands.** The parent band is the uppermost strong peak; above about 37% editing the larger cleavage product is brighter than the parent, so the strongest peak is not always the parent. In rows with three or more sample lanes, the cleavage products are located at offsets shared by the lanes of the row, measured from each lane's own parent band, and each lane's parent is checked against those offsets. A product only has to stand three times above the profile noise, so faint products next to a strong parent are found. Tilted rows and slight smiling therefore work, and a faint product is still found where its brighter neighbours put it. In smaller rows each lane uses its own strongest products (two, or one in *One* mode).
+- **Bands.** The parent band is the uppermost strong peak; above about 37% editing the larger cleavage product is brighter than the parent, so the strongest peak is not always the parent. In rows with three or more sample lanes, the cleavage products are located at offsets shared by the lanes, measured from each lane's own parent band. Rows can mix amplicons: lanes whose two strongest lower bands agree form a group, each group of two or more lanes gives a product pattern, and every lane takes the pattern and parent that explain its bands best. A product only has to stand three times above the profile noise, so faint products next to a strong parent are found. Tilted rows and slight smiling therefore work, and a faint product is still found where its brighter neighbours put it. In smaller rows each lane uses its own strongest products (two, or one in *One* mode).
 - **Background.** By default a straight line joins the valleys on either side of each band (*Valley*), which is how ImageJ Gel Analyzer is used by hand. *Envelope* draws one line under the whole lane. *Blend* starts from the valley line and moves it towards the envelope where smear lifts the valleys between bands.
-- **Areas.** Each band's area is the profile summed above the baseline between its two boundaries. You can drag the boundary markers on the profile plot; the lane is then marked *edited*.
-- **Ladders.** A lane with four or more strong bands, or with strong bands that match neither the parent nor the product positions, is marked as a marker. Markers take no part in finding the product positions and are not quantified.
+- **Areas.** Each band's area is the profile summed above the baseline between its two boundaries. You can drag the boundary markers on the profile plot; the lane is then marked *edited*. A band removed by hand is modelled as a Gaussian peak and subtracted before its neighbours are measured, so its tails do not lift their baselines.
+- **Ladders.** Ladders sit at the ends of a row, so only the first or last lane is marked as a marker: when it has four or more strong bands, or strong bands that match neither the parent nor the product positions. An interior lane like that is measured as a sample, with an extra-band warning or with product positions of its own. Markers take no part in finding the product positions and are not quantified.
 
 ### Parameters
 
@@ -72,7 +72,9 @@ Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit c
 | well? | The parent sits at the very top of the box, which usually means a well is inside the box. Start the box just above the parent bands. |
 | unassigned band | A band inside the measured range is neither the parent nor a product, so its signal may be counted. |
 | band above | A band above the parent: often a faint parent at very high editing, or a well. Check the band assignment. |
-| edited | Band boundaries were moved by hand (`manual band boundaries` in the CSV). |
+| edited | Band boundaries were moved by hand (`manual band boundaries` in the export). |
+| bands set | Bands were removed or assigned by hand (`manual band assignment`). |
+| product positions differ from the row | The lane does not show the row's shared products but has two strong bands of its own, so it uses those (rows can mix amplicons). |
 
 The CSV export prefixes labels that start with `=`, `+`, `-` or `@` with an apostrophe, so spreadsheets do not run them as formulas.
 
@@ -111,6 +113,7 @@ node --test "tests/*.test.js"
 | `js/analysis.js` | Densitometry engine (no DOM; also used by the tests) |
 | `js/app.js` | User interface |
 | `js/tiff.js` | TIFF reader |
+| `js/xlsx.js` | Small XLSX writer for the Excel export (no dependencies) |
 | `js/sample.js` | Synthetic sample gel with known values |
 | `css/` | Industry design system and app styles |
 | `fonts/` | Barlow and Barlow Condensed (SIL Open Font License) |

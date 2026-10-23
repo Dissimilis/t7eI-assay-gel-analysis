@@ -199,7 +199,7 @@
     const sample = bps === 8 ? i => raw[i] : bps === 16 ? i => rdv.getUint16(2 * i, le) : i => rdv.getFloat32(4 * i, le);
     const total = w * h * spp;
     let lo = 0, hi = 255, bits = bps;
-    let clipTop = null, clipBottom = null, quantum = 1;
+    let clipTop = null, clipBottom = null, quantum = 1, stored8 = false;
     if (bps === 16) {
       // Cameras often store 12- or 14-bit data in 16-bit files, right- or left-aligned. A sensor
       // that clipped leaves a pile of pixels at one value: that value is the real ceiling.
@@ -217,6 +217,9 @@
       if (pile(min, -1)) clipBottom = min;
       const ceiling = clipTop != null ? clipTop : max;
       bits = [10, 12, 14, 16].find(b => ceiling <= 2 ** b - 1);
+      if (quantum >= 256 || used % 257 === 0 && Array.from({ length: 256 }, (_, v) => hist[v * 257]).reduce((a, c) => a + c, 0) === total) {
+        stored8 = true;   // 8-bit data scaled into a 16-bit file: only 256 levels are real
+      }
       hi = 2 ** bits - 1;
     } else if (bps === 32) {
       lo = Infinity; hi = -Infinity;
@@ -243,7 +246,7 @@
     // Map raw piles to the grey scale; WhiteIsZero swaps which end is which.
     const ends = [clipTop, clipBottom].filter(v => v != null).map(toGray);
     ends.forEach(g => { if (g > 127) clipHigh = Math.min(clipHigh, g - half); else clipLow = Math.max(clipLow, g + half); });
-    return { w, h, gray, bits, clipLow, clipHigh };
+    return { w, h, gray, bits: stored8 ? 8 : bits, storedBits: 16, clipLow, clipHigh };
   }
 
   return { isTiff, decode, lzw, packBits };

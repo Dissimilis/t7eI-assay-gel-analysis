@@ -278,3 +278,38 @@ test('noisy boxes cut a little into the parent tail are flagged (review cases)',
     assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0, y1 }), [25, 25, 25, 25], `noisy box ${y0}-${y1}`);
   }
 });
+
+// Manual band choices: remove an extra band, choose products, choose the parent.
+test('a removed band is neither picked as a product nor counted', () => {
+  // Bands spread apart (parent 30, products 70 and 115) with an extra band at 92 between the products.
+  const p = 0.2, fc = 1 - (1 - p) ** 2;
+  const bandsWith = extra => [[30, 1 - fc], [70, fc * 2 / 3], [115, fc / 3]].concat(extra);
+  const lanes = [60, 160, 260, 360].map(x => ({ x, bands: bandsWith([[92, 0.25]]) }));
+  const img = bandGel(lanes, { w: 500 });
+  const box = { x0: 0, x1: 500, y0: 5, y1: 150 };
+  const auto = analyseBox(img, box);
+  const sig = T.signalImage(img, 'dark');
+  const d = T.detectLanes(sig, img, box);
+  const rows = [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null, bands: { parent: null, products: [null, null], removed: [92] } })) })];
+  const fixed = T.analyze(img, rows, { polarity: 'dark' }).rows[0];
+  fixed.lanes.forEach((l, i) => {
+    assert.ok(Math.abs(l.editing - 20) <= 1.5, `lane ${i}: ${l.editing.toFixed(2)} with the extra band removed (automatic ${auto.lanes[i].editing.toFixed(2)})`);
+    assert.ok(l.flags.includes('manual band assignment'));
+    assert.ok(l.segKinds.includes(-1), 'removed band has its own excluded segment');
+  });
+});
+
+test('products and parent chosen by hand are used', () => {
+  const p = 0.25, fc = 1 - (1 - p) ** 2;
+  const lanes = [60, 160, 260, 360].map(x => ({ x, bands: [[30, 1 - fc], [70, fc * 2 / 3], [115, fc / 3], [92, 0.3]] }));
+  const img = bandGel(lanes, { w: 500 });
+  const box = { x0: 0, x1: 500, y0: 5, y1: 150 };
+  const sig = T.signalImage(img, 'dark');
+  const d = T.detectLanes(sig, img, box);
+  const rows = [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null, bands: { parent: 30, products: [70, 115], removed: [92] } })) })];
+  const res = T.analyze(img, rows, { polarity: 'dark' }).rows[0];
+  res.lanes.forEach((l, i) => {
+    assert.deepEqual(l.peaks.map(y => y + l.y0), [30, 70, 115], `lane ${i} bands`);
+    assert.ok(Math.abs(l.editing - 25) <= 1.5, `lane ${i}: ${l.editing.toFixed(2)}`);
+  });
+});

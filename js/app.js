@@ -2,20 +2,20 @@
 (function () {
   'use strict';
 
-  const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample;
-  const VERSION = '1.0.0';
+  const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample, XLSX = window.T7EIXlsx;
+  const VERSION = '1.1.0';
   const STORE = 't7eI.params.v1';
   const $ = id => document.getElementById(id);
 
   const els = {
     fileName: $('fileName'), fileInput: $('fileInput'), loadBtn: $('loadBtn'), sampleBtn: $('sampleBtn'),
-    csvBtn: $('csvBtn'), pngBtn: $('pngBtn'),
+    csvBtn: $('csvBtn'), xlsxBtn: $('xlsxBtn'), pngBtn: $('pngBtn'), bandMenu: $('bandMenu'),
     stage: document.querySelector('.stage'), img: $('imgCanvas'), ov: $('ovCanvas'), empty: $('emptyMsg'),
     rowsBar: $('rowsBar'), meta: $('imgMeta'),
     laneWidth: $('laneWidth'), laneWidthVal: $('laneWidthVal'), smoothing: $('smoothing'), smoothingVal: $('smoothingVal'),
     resetParams: $('resetParams'),
     chips: $('laneChips'), selTitle: $('selTitle'), prof: $('profCanvas'),
-    resetBands: $('resetBands'), removeLane: $('removeLane'), zoomBtn: $('zoomBtn'),
+    resetBands: $('resetBands'), undoBands: $('undoBands'), removeLane: $('removeLane'), zoomBtn: $('zoomBtn'),
     stParent: $('stParent'), stFc: $('stFc'), stEd: $('stEd'), selFlags: $('selFlags'),
     resBody: $('resBody'), resHint: $('resHint')
   };
@@ -145,6 +145,7 @@
         const t = await TIFF.decode(buf);
         img = T.makeImage(t.gray, t.w, t.h, t);
         img.saturationUnknown = !!t.saturationUnknown;
+        img.storedBits = t.storedBits || t.bits;
       } else {
         const bmp = await createImageBitmap(new Blob([buf], { type: file.type || 'image/png' }), { colorSpaceConversion: 'none', premultiplyAlpha: 'none', imageOrientation: 'from-image' });
         if (bmp.width * bmp.height > MAX_PIXELS) throw new Error('the image is ' + Math.round(bmp.width * bmp.height / 1e6) + ' megapixels; the limit is ' + MAX_PIXELS / 1e6 + ' MP. Crop it first.');
@@ -204,6 +205,7 @@
       if (hi <= lo) { lo = 0; hi = 255; }
     }
     const k = 255 / (hi - lo);
+    state.disp = { lo, k };
     for (let i = 0, j = 0; i < img.gray.length; i++, j += 4) {
       const v = clamp((img.gray[i] - lo) * k, 0, 255);
       id.data[j] = id.data[j + 1] = id.data[j + 2] = v;
@@ -302,7 +304,7 @@
     renderTable();
     renderMeta();
     const has = !!state.result;
-    els.csvBtn.disabled = els.pngBtn.disabled = !has;
+    els.csvBtn.disabled = els.xlsxBtn.disabled = els.pngBtn.disabled = !has;
   }
 
   function renderParams() {
@@ -321,7 +323,8 @@
     const img = state.img;
     const parts = [];
     if (img) {
-      parts.push(img.w + ' × ' + img.h + ' px, ' + img.bits + '-bit' + (img.lossy ? ' JPEG (lossy: prefer a raw TIFF for quantification)' : '') +
+      parts.push(img.w + ' × ' + img.h + ' px, ' + img.bits + '-bit' + (img.storedBits > img.bits ? ' data in a ' + img.storedBits + '-bit file' : '') +
+        (img.lossy ? ' JPEG (lossy: prefer a raw TIFF for quantification)' : '') +
         (img.saturationUnknown ? ' (floating point: saturation cannot be checked)' : ''));
     }
     els.meta.textContent = parts.join(' · ');
@@ -434,10 +437,13 @@
 
   function renderLane() {
     const s = selIndex();
+    const menuLane = s ? laneAt(s.ri, s.li).id : null;
+    if (menuLane !== state.menuLane) { state.menuLane = menuLane; if (els.bandMenu) els.bandMenu.hidden = true; }
     const r = s && resLane(s.ri, s.li), lane = s && laneAt(s.ri, s.li);
     const labs = labels();
     els.selTitle.textContent = s ? 'Row ' + (s.ri + 1) + ' · Lane ' + labs[s.ri][s.li] : '—';
-    els.resetBands.disabled = !lane || !lane.valleys;
+    els.resetBands.disabled = !lane || (!lane.valleys && !lane.bands);
+    els.undoBands.disabled = !lane || !(lane.undo && lane.undo.length);
     els.removeLane.disabled = !lane;
     const quant = r && r.role !== 'marker' && r.role !== 'excluded';
     els.stParent.textContent = quant ? fmtInt(r.areas[0]) : '—';
@@ -459,7 +465,8 @@
     drawProfile(r);
   }
 
-  const PAD = { l: 40, r: 10, t: 16, b: 22 };
+  const STRIP = 14;   // height of the lane image strip drawn above the plot
+  const PAD = { l: 40, r: 10, t: 16 + STRIP + 6, b: 22 };
 
   function profScale(r) {
     const c = els.prof, w = c.clientWidth, h = c.clientHeight;
@@ -496,6 +503,25 @@
       return;
     }
     const S = profScale(r), p = r.profile, b = r.baseline;
+    // the lane itself as an image strip, aligned with the profile's distance axis
+    if (state.img && state.disp) {
+      const img = state.img, d = state.disp;
+      for (let i = 0; i < S.n; i++) {
+        const y = r.y0 + i;
+        if (y < 0 || y >= img.h) continue;
+        let sum = 0;
+        for (let xx = r.a; xx <= r.b; xx++) sum += img.gray[y * img.w + xx];
+        const v = Math.round(clamp((sum / (r.b - r.a + 1) - d.lo) * d.k, 0, 255));
+        x.fillStyle = `rgb(${v},${v},${v})`;
+        const x0 = S.X(i - 0.5), x1 = S.X(i + 0.5);
+        x.fillRect(Math.floor(x0), 6, Math.ceil(x1 - x0) + 1, STRIP);
+      }
+      x.strokeStyle = col.text; x.globalAlpha = 0.25; x.lineWidth = 1;
+      x.strokeRect(PAD.l + 0.5, 6.5, S.w - PAD.l - PAD.r - 1, STRIP - 1);
+      x.globalAlpha = 0.6; x.fillStyle = col.text; x.font = '10px Barlow, sans-serif'; x.textAlign = 'right'; x.textBaseline = 'middle';
+      x.fillText('lane', PAD.l - 6, 6 + STRIP / 2);
+      x.globalAlpha = 1;
+    }
     // grid and axes
     x.font = '10px Barlow, sans-serif'; x.fillStyle = col.text; x.strokeStyle = col.text;
     const ticks = 4;
@@ -512,14 +538,22 @@
     x.beginPath(); x.rect(PAD.l, PAD.t, S.w - PAD.l - PAD.r, S.h - PAD.t - PAD.b); x.clip();
     const quant = r.role !== 'marker' && r.role !== 'excluded';
     if (quant) {
+      const pc = r.corrected || p;   // areas are measured on the profile with removed bands taken out
       for (let s = 0; s < r.valleys.length - 1; s++) {
-        if (s > 0 && !r.found[s] && r.areas[s] === 0) continue;
-        x.globalAlpha = s === 0 ? 0.32 : 0.2;
-        x.fillStyle = s === 0 && r.flags.includes('parent saturated') ? col.warn : col.acc;
+        const kind = r.segKinds ? r.segKinds[s] : s;
+        if (kind > 0 && !r.found[kind] && r.areas[kind] === 0) continue;
+        const top = kind < 0 ? p : pc;
+        x.globalAlpha = kind < 0 ? 0.1 : kind === 0 ? 0.32 : 0.2;
+        x.fillStyle = kind < 0 ? col.text : kind === 0 && r.flags.includes('parent saturated') ? col.warn : col.acc;
         x.beginPath();
-        for (let i = r.valleys[s]; i <= r.valleys[s + 1]; i++) x.lineTo(S.X(i), S.Y(Math.max(p[i], b[i])));
+        for (let i = r.valleys[s]; i <= r.valleys[s + 1]; i++) x.lineTo(S.X(i), S.Y(Math.max(top[i], b[i])));
         for (let i = r.valleys[s + 1]; i >= r.valleys[s]; i--) x.lineTo(S.X(i), S.Y(b[i]));
         x.closePath(); x.fill();
+      }
+      if (r.corrected) {
+        x.strokeStyle = col.text; x.globalAlpha = 0.5; x.lineWidth = 1; x.setLineDash([2, 3]); x.beginPath();
+        for (let i = r.valleys[0]; i <= r.valleys[r.valleys.length - 1]; i++) x.lineTo(S.X(i), S.Y(pc[i]));
+        x.stroke(); x.setLineDash([]); x.globalAlpha = 1;
       }
       x.globalAlpha = 1;
       x.strokeStyle = col.acc7; x.lineWidth = 1.25; x.setLineDash([5, 4]); x.beginPath();
@@ -534,10 +568,18 @@
     if (!quant) return;
     // band labels and boundary handles
     x.font = '600 12px "Barlow Condensed", sans-serif'; x.textAlign = 'center'; x.textBaseline = 'bottom';
+    const labelY = i => Math.max(PAD.t + 12, S.Y(p[i]) - 3);
+    // Other detected peaks: grey dots, clickable to assign or remove.
+    (r.candidates || []).forEach(i => {
+      if (r.peaks.some(pk => Math.abs(pk - i) <= 2) || (r.removed || []).some(j => Math.abs(j - i) <= 2)) return;
+      x.fillStyle = col.text; x.globalAlpha = 0.45;
+      x.beginPath(); x.arc(S.X(i), labelY(i) - 4, 2.5, 0, 2 * Math.PI); x.fill();
+    });
+    (r.removed || []).forEach(i => { x.fillStyle = col.text; x.globalAlpha = 0.6; x.fillText('✕', S.X(i), labelY(i)); });
     r.peaks.forEach((pk, k) => {
       x.fillStyle = k === 0 ? col.acc7 : col.acc;
       x.globalAlpha = r.found[k] ? 1 : 0.45;
-      x.fillText(k === 0 ? 'P' : String(k), S.X(pk), Math.max(PAD.t + 12, S.Y(p[pk]) - 3));
+      x.fillText((k === 0 ? 'P' : String(k)) + (r.fixed && r.fixed[k] ? '•' : ''), S.X(pk), labelY(pk));
     });
     x.globalAlpha = 1;
     r.valleys.forEach((v, k) => {
@@ -608,7 +650,7 @@
       'band at the top of the box: a well?': 'well?', 'unassigned band inside the measured range': 'unassigned band', 'band above the parent': 'band above',
       'extra band not matching the cleavage products': 'extra band', 'check band assignment': 'check bands', 'no cleavage products found': 'no products',
       'manual band boundaries': 'edited', 'only one cleavage product found': 'one product', 'second product visible: set two products': 'second product?',
-      'cleavage product brighter than parent': 'brighter product' })[f] ||
+      'cleavage product brighter than parent': 'brighter product', 'manual band assignment': 'bands set' })[f] ||
       f.replace('product ', 'P').replace(' not detected', ' missing').replace(/fraction cleaved > 0.5.*/, 'f > 0.5');
   }
 
@@ -730,10 +772,18 @@
   els.prof.addEventListener('pointerdown', e => {
     const s = selIndex(), r = s && resLane(s.ri, s.li);
     if (!r || r.role === 'marker' || r.role === 'excluded') return;
-    const rect = els.prof.getBoundingClientRect(), mx = e.clientX - rect.left;
+    const rect = els.prof.getBoundingClientRect(), mx = e.clientX - rect.left, my = e.clientY - rect.top;
     const S = profScale(r);
     let best = -1, bd = 9;
     r.valleys.forEach((v, k) => { const d = Math.abs(S.X(v) - mx); if (d < bd) { bd = d; best = k; } });
+    const peak = peakAt(r, S, mx);
+    // Near a boundary marker (or in the handle strip at the bottom) drag it; otherwise a peak opens its menu.
+    if (peak != null && (best < 0 || (my < S.h - PAD.b - 14 && Math.abs(S.X(peak) - mx) < bd))) {
+      e.preventDefault();
+      openBandMenu(s, r, S, peak);
+      return;
+    }
+    closeBandMenu();
     if (best < 0) return;
     e.preventDefault();
     els.prof.setPointerCapture(e.pointerId);
@@ -761,6 +811,7 @@
     const lo = d.k === 0 ? 0 : v[d.k - 1] + 1, hi = d.k === v.length - 1 ? S.n - 1 : v[d.k + 1] - 1;
     const to = clamp(S.I(mx), lo, hi);
     if (!lane.valleys && to === v[d.k]) return;   // pointer jitter on the handle is not an edit
+    if (!d.saved) { saveUndo(lane); d.saved = true; }
     v[d.k] = to;
     lane.valleys = v.map(i => i + r.y0);
     recomputeSoon();
@@ -796,7 +847,97 @@
     recompute();
   });
 
-  els.resetBands.addEventListener('click', () => { const s = selIndex(); if (s) { laneAt(s.ri, s.li).valleys = null; recompute(); } });
+  els.resetBands.addEventListener('click', () => {
+    const s = selIndex();
+    if (s) { const lane = laneAt(s.ri, s.li); saveUndo(lane); lane.valleys = null; lane.bands = null; closeBandMenu(); recompute(); }
+  });
+  els.undoBands.addEventListener('click', () => {
+    const s = selIndex();
+    if (!s) return;
+    const lane = laneAt(s.ri, s.li);
+    if (!lane.undo || !lane.undo.length) return;
+    const prev = JSON.parse(lane.undo.pop());
+    lane.bands = prev.bands; lane.valleys = prev.valleys;
+    closeBandMenu();
+    recompute();
+  });
+
+  // ------------------------------------------------------------ band menu (remove or assign a peak)
+
+  /** Nearest clickable peak (assigned, removed or detected) within 10 px of the pointer. */
+  function peakAt(r, S, mx) {
+    const all = r.peaks.concat(r.removed || [], r.candidates || []);
+    let best = null, bd = 10;
+    all.forEach(i => { const d = Math.abs(S.X(i) - mx); if (d < bd) { bd = d; best = i; } });
+    return best;
+  }
+
+  function bandRole(r, i) {
+    const k = r.peaks.findIndex(pk => Math.abs(pk - i) <= 2);
+    if (k === 0) return 'parent';
+    if (k > 0) return 'p' + k;
+    return (r.removed || []).some(j => Math.abs(j - i) <= 2) ? 'removed' : 'none';
+  }
+
+  /** Remember a lane's band choices and boundaries so the next edit can be undone. */
+  function saveUndo(lane) {
+    lane.undo = (lane.undo || []).slice(-19);
+    lane.undo.push(JSON.stringify({ bands: lane.bands || null, valleys: lane.valleys || null }));
+  }
+
+  function setBand(lane, absY, role) {
+    saveUndo(lane);
+    const b = lane.bands ? JSON.parse(JSON.stringify(lane.bands)) : { parent: null, products: [null, null], removed: [] };
+    const same = v => v != null && Math.abs(v - absY) <= 3;
+    if (same(b.parent)) b.parent = null;
+    b.products = b.products.map(v => (same(v) ? null : v));
+    b.removed = b.removed.filter(v => !same(v));
+    if (role === 'parent') b.parent = absY;
+    else if (role === 'p1') b.products[0] = absY;
+    else if (role === 'p2') b.products[1] = absY;
+    else if (role === 'removed') b.removed.push(absY);
+    lane.bands = b.parent == null && !b.products.some(v => v != null) && !b.removed.length ? null : b;
+    lane.valleys = null;   // band set changed: boundaries are found again
+  }
+
+  function openBandMenu(s, r, S, i) {
+    const lane = laneAt(s.ri, s.li), role = bandRole(r, i), absY = i + r.y0;
+    const b = lane.bands || {};
+    const manual = [b.parent].concat(b.products || [], b.removed || []).some(v => v != null && Math.abs(v - absY) <= 3);
+    const m = els.bandMenu;
+    m.textContent = '';
+    const title = document.createElement('div');
+    title.className = 'menu-title';
+    const roleText = { parent: ' · parent', p1: ' · product 1', p2: ' · product 2', removed: ' · removed' }[role] || '';
+    title.textContent = 'Band at ' + i + ' px' + roleText;
+    m.appendChild(title);
+    const add = (text, fn) => {
+      const btn = document.createElement('button');
+      btn.type = 'button'; btn.className = 'btn btn-ghost'; btn.setAttribute('role', 'menuitem'); btn.textContent = text;
+      btn.addEventListener('click', ev => { ev.stopPropagation(); fn(); closeBandMenu(); recompute(); els.prof.focus(); });
+      m.appendChild(btn);
+    };
+    if (role !== 'removed' && role !== 'parent') add('Remove this band', () => setBand(lane, absY, 'removed'));
+    if (role === 'removed') add('Restore', () => setBand(lane, absY, 'auto'));
+    if (role !== 'parent') add('Use as parent', () => setBand(lane, absY, 'parent'));
+    if (role !== 'p1') add('Use as product 1', () => setBand(lane, absY, 'p1'));
+    if (state.params.products === 2 && role !== 'p2') add('Use as product 2', () => setBand(lane, absY, 'p2'));
+    if (manual && role !== 'removed') add('Automatic', () => setBand(lane, absY, 'auto'));
+    const frame = els.prof.parentElement.getBoundingClientRect(), c = els.prof.getBoundingClientRect();
+    m.hidden = false;
+    const left = c.left - frame.left + S.X(i) + 8, top = c.top - frame.top + Math.max(PAD.t, S.Y(r.profile[i]) - 10);
+    m.style.left = Math.min(left, frame.width - m.offsetWidth - 4) + 'px';
+    m.style.top = Math.min(top, frame.height - m.offsetHeight - 4) + 'px';
+    const first = m.querySelector('button');
+    if (first) first.focus();
+  }
+
+  function closeBandMenu() { els.bandMenu.hidden = true; }
+
+  document.addEventListener('pointerdown', e => {
+    if (!els.bandMenu.hidden && !e.target.closest('#bandMenu') && e.target !== els.prof) closeBandMenu();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeBandMenu(); });
   els.removeLane.addEventListener('click', removeSelectedLane);
   els.zoomBtn.addEventListener('click', () => {
     state.profZoom = !state.profZoom;
@@ -926,7 +1067,32 @@
     c.toBlob(b => download(b, baseName() + '-t7eI.png'), 'image/png');
   }
 
+  function exportXlsx() {
+    if (!state.result) return;
+    const p = state.params;
+    const rows = [['Row', 'Lane', 'Label', 'Type', 'x (px)', 'Parent area', 'Cut 1 area', 'Cut 2 area', 'Fraction cleaved', '% editing', 'Flags']];
+    lanesForExport().forEach(e => {
+      const r = e.r, quant = r.role !== 'marker' && r.role !== 'excluded';
+      const num = (v, d) => (typeof v === 'number' && isFinite(v) ? Number(v.toFixed(d)) : null);
+      rows.push([e.row, e.lane, e.label, r.role, r.x,
+        quant ? num(r.areas[0], 2) : null, quant ? num(r.areas[1], 2) : null, quant ? num(r.areas[2], 2) : null,
+        quant ? num(r.fc, 4) : null, quant ? num(r.editing, 2) : null, r.flags.join('; ')]);
+    });
+    const settings = [['Setting', 'Value'],
+      ['App', 'T7E1 Gel Analysis ' + VERSION], ['File', state.name], ['Exported', new Date().toISOString()],
+      ['Formula', '% editing = 100*(1-sqrt(1-f)), f = (cut1+cut2)/(parent+cut1+cut2) (Guschin 2010, NEB)'],
+      ['Background', p.background], ['Lane width (% of pitch)', Math.round(p.laneWidth * 100)],
+      ['Smoothing sigma (px)', p.smoothing], ['Cleavage products', p.products],
+      ['Image', state.img.w + ' x ' + state.img.h + ' px, ' + state.img.bits + '-bit']];
+    const data = XLSX.build([
+      { name: 'Results', rows, widths: [6, 6, 10, 9, 8, 12, 11, 11, 15, 11, 60] },
+      { name: 'Settings', rows: settings, widths: [26, 70] }
+    ]);
+    download(new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), baseName() + '-t7eI.xlsx');
+  }
+
   els.csvBtn.addEventListener('click', exportCsv);
+  els.xlsxBtn.addEventListener('click', exportXlsx);
   els.pngBtn.addEventListener('click', exportPng);
 
   // ------------------------------------------------------------ start

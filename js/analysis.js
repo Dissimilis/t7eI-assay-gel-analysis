@@ -135,6 +135,30 @@
     return (1.4826 * median(d)) / Math.sqrt(6);
   }
 
+  /** Nearest local maximum within `reach` of index i (the index itself when there is none). */
+  function snapPeak(p, i, reach) {
+    i = Math.min(p.length - 2, Math.max(1, Math.round(i)));
+    let best = -1;
+    for (let j = Math.max(1, i - reach); j <= Math.min(p.length - 2, i + reach); j++) {
+      if (isLocalMax(p, j) && (best < 0 || Math.abs(j - i) < Math.abs(best - i) || (Math.abs(j - i) === Math.abs(best - i) && p[j] > p[best]))) best = j;
+    }
+    return best < 0 ? i : best;
+  }
+
+  /** Manual band choices of a lane in profile indices: { parent, products: [i|null], removed: [i] }. */
+  function laneOverrides(lane, ps, y0) {
+    const b = lane.bands || {}, n = ps.length;
+    const idx = y => (y == null || !isFinite(y) ? null : snapPeak(ps, y - y0, 3));
+    const inside = i => i != null && i > 0 && i < n - 1;
+    const parent = idx(b.parent), products = (b.products || []).map(idx);
+    return {
+      parent: inside(parent) ? parent : null,
+      products: products.map(i => (inside(i) ? i : null)),
+      removed: (b.removed || []).map(idx).filter(inside),
+      any: b.parent != null || (b.products || []).some(v => v != null) || (b.removed || []).length > 0
+    };
+  }
+
   function argmax(p, a, b) {
     a = Math.max(0, a | 0); b = Math.min(p.length - 1, b | 0);
     let k = a;
@@ -388,12 +412,16 @@
       const ps = smooth(p, prm.smoothing);
       const noise = Math.max(1e-3, noiseSigma(p));
       const top = argmax(ps, 0, n - 1);
-      const P = parentIndex(ps, top, n, noise);
-      const q = { lane, p, ps, a, b, P, noise, cands: productCandidates(ps, P, noise) };
+      const ov = laneOverrides(lane, ps, r.y0);
+      const P = ov.parent != null ? ov.parent : parentIndex(ps, top, n, noise);
+      const near = i => ov.removed.some(j => Math.abs(j - i) <= 3);
+      const q = { lane, p, ps, a, b, P, noise, ov, parentFixed: ov.parent != null, isEnd: false,
+        cands: productCandidates(ps, P, noise).filter(c => !near(P + c.off)) };
       // A ladder has more strong bands than parent plus two products; keep it out of the vote.
       q.ladderLike = !lane.role && strongPeaks(ps, P, n).length >= 4;
       return q;
     });
+    pre.forEach((q, i) => { q.isEnd = i === 0 || i === pre.length - 1; q.rowLanes = pre.length; });
     const autoPre = pre.filter(q => !q.lane.role);
     const ladderLike = autoPre.filter(q => q.ladderLike);
     if (autoPre.length >= 3 && ladderLike.length > autoPre.length / 2) {
@@ -416,20 +444,55 @@
         offsets = ownOffsets(best, prm.products);
       }
     }
-    if (offsets && offsets.length) {
-      // A further band position shared by half the lanes means one of the bands is not a cleavage product.
+    const tolOf = o => 3 + 0.15 * o;
+    const samePattern = (a, b) => a.length === b.length && a.every((o, k) => Math.abs(o - b[k]) <= tolOf(Math.max(o, b[k])));
+    const patterns = offsets && offsets.length ? [offsets] : [];
+    if (patterns.length && usable.length >= 3) {
+      // Rows can mix amplicons. Lanes whose two strongest lower bands agree form a group, and every
+      // group seen in at least two lanes becomes a product pattern besides the row consensus.
+      const groups = [];
+      usable.forEach(q => {
+        const h = q.ps[q.P] - minOf(q.ps);
+        const own = q.cands.filter(c => c.prom >= 0.05 * h).sort((a, b) => b.prom - a.prom).slice(0, prm.products).map(c => c.off).sort((a, b) => a - b);
+        if (own.length < prm.products) return;
+        const g = groups.find(x => samePattern(x.ref, own));
+        if (g) g.items.push(own); else groups.push({ ref: own, items: [own] });
+      });
+      groups.filter(g => g.items.length >= 2).forEach(g => {
+        const pat = g.ref.map((_, k) => median(g.items.map(it => it[k])));
+        if (!patterns.some(x => samePattern(x, pat))) patterns.push(pat);
+      });
+    }
+    if (patterns.length) {
+      // A further band position shared by half the lanes, not part of any pattern, is not a cleavage product.
       const all = consensusOffsets(usable.map(q => q.cands), 8, Math.max(3, Math.ceil(usable.length / 2)));
-      if (all.some(o => !offsets.some(e => Math.abs(e - o) <= 3 + 0.15 * Math.max(e, o)))) usable.forEach(q => { q.extraBand = true; });
-      // The true parent is the band from which the products sit at the shared offsets. This finds a
-      // faint parent above about 65% editing and passes over a well or stray band above it.
-      pre.forEach(q => {
+      if (all.some(o => !patterns.some(pat => pat.some(e => Math.abs(e - o) <= tolOf(Math.max(e, o)))))) usable.forEach(q => { q.extraBand = true; });
+      // Each lane takes the pattern and parent that explain its bands best. The parent is the band from
+      // which the products sit at the pattern's offsets: this finds a faint parent above about 65%
+      // editing and passes over a well or stray band above it. Ladders sit at the ends of a row, so
+      // end lanes keep the row consensus.
+      pre.forEach((q, i) => {
         if (q.lane.role === 'marker' || q.lane.role === 'excluded' || q.ladderLike) return;
-        const P = bestParent(q, offsets, n);
-        if (P !== q.P) { q.P = P; q.cands = productCandidates(q.ps, P, q.noise); }
+        const choices = (i === 0 || i === pre.length - 1) && pre.length >= 3 ? patterns.slice(0, 1) : patterns;
+        let best = null;
+        choices.forEach((pat, k) => {
+          const fit = bestParent(q, pat, n);
+          if (!best || betterFit(fit.fit, best.fit)) best = { k, pat, P: fit.P, fit: fit.fit };
+        });
+        if (best.P !== q.P) {
+          const near = j => q.ov.removed.some(x => Math.abs(x - j) <= 3);
+          q.P = best.P;
+          q.cands = productCandidates(q.ps, best.P, q.noise).filter(c => !near(best.P + c.off));
+        }
+        if (best.k > 0) q.ownOffsets = best.pat;
       });
     }
     // With fewer than three lanes there is no majority to vote: each lane uses its own strongest products.
-    const lanes = pre.map(q => analyzeLane(q, offsets || ownOffsets(q, prm.products), n, r, img, prm));
+    const lanes = pre.map(q => {
+      const l = analyzeLane(q, q.ownOffsets || offsets || ownOffsets(q, prm.products), n, r, img, prm);
+      if (q.ownOffsets) l.flags.push('product positions differ from the row');
+      return l;
+    });
 
     const auto = lanes.filter(l => l.autoRole);
     const autoMarkers = auto.filter(l => l.role === 'marker' && !l.ladderLike);
@@ -446,6 +509,11 @@
     return { region: r, pitch, half, offsets: offsets || [], shared: !!(offsets && offsets.length), lanes };
   }
 
+  /** Fit comparison: more products found; then fewer unexplained strong bands; then a closer fit. */
+  function betterFit(a, b) {
+    return a.hits > b.hits || (a.hits === b.hits && a.hits > 0 && (a.left < b.left || (a.left === b.left && a.dev < b.dev - 1)));
+  }
+
   /** Parent candidate whose product offsets match the most bands; ties keep the first-pass choice. */
   function bestParent(q, offsets, n) {
     const { ps, noise } = q;
@@ -456,20 +524,30 @@
     for (let j = 1; j < n - 1; j++) {
       if (j !== q.P && j !== top && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.05 * ref)) cands.push(j);
     }
-    const score = P => offsets.reduce((s, off) => {
-      const tol = 3 + 0.15 * off;
-      for (let j = Math.max(1, Math.round(P + off - tol)); j <= Math.min(n - 2, Math.round(P + off + tol)); j++) {
-        if (isLocalMax(ps, j) && prominence(ps, j, reach) >= 3 * noise) return s + 1;
-      }
-      return s;
-    }, 0);
-    let best = q.P, bestScore = score(q.P);
+    // Score: products found at the shared offsets; then fewer strong bands below the parent left
+    // unexplained (a well or smear taken as parent leaves the real product 2 over); then a closer fit.
+    const strongBelow = [];
+    for (let j = 1; j < n - 1; j++) if (isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.15 * ref)) strongBelow.push(j);
+    const score = P => {
+      const acc = offsets.reduce((a, off) => {
+        const tol = 3 + 0.15 * off;
+        let dev = Infinity;
+        for (let j = Math.max(1, Math.round(P + off - tol)); j <= Math.min(n - 2, Math.round(P + off + tol)); j++) {
+          if (isLocalMax(ps, j) && prominence(ps, j, reach) >= 3 * noise) dev = Math.min(dev, Math.abs(j - P - off));
+        }
+        return isFinite(dev) ? { hits: a.hits + 1, dev: a.dev + dev } : a;
+      }, { hits: 0, dev: 0 });
+      acc.left = strongBelow.filter(j => j > P + 4 && !offsets.some(off => Math.abs(j - P - off) <= 3 + 0.15 * off)).length;
+      return acc;
+    };
+    let best = q.parentFixed ? q.P : q.P, bestScore = score(q.P);
+    if (q.parentFixed) return { P: best, fit: bestScore };
     for (const c of cands) {
       const sc = score(c);
-      // Equal support: the upper band is the parent (a faint parent above about 65% editing).
-      if (sc > bestScore || (sc === bestScore && sc > 0 && c < best)) { best = c; bestScore = sc; }
+      // Equal support and fit: the upper band is the parent (a faint parent above about 65% editing).
+      if (betterFit(sc, bestScore) || (sc.hits === bestScore.hits && sc.hits > 0 && !betterFit(bestScore, sc) && c < best)) { best = c; bestScore = sc; }
     }
-    return best;
+    return { P: best, fit: bestScore };
   }
 
   function sumProm(c) { return c.reduce((s, x) => s + x.prom, 0); }
@@ -489,6 +567,39 @@
     return top;
   }
 
+  /**
+   * Profile with removed bands taken out: each is modelled as a Gaussian with its own height above
+   * the local floor and a width from its cleaner (narrower) half-maximum flank, then subtracted.
+   */
+  function withoutBands(ps, idx) {
+    const out = Float32Array.from(ps), n = ps.length;
+    idx.forEach(m => {
+      let l = m, r = m;
+      while (l > 0 && ps[l - 1] < ps[l]) l--;
+      while (r < n - 1 && ps[r + 1] < ps[r]) r++;
+      const floor = Math.max(ps[l], ps[r]) - (Math.abs(ps[l] - ps[r]) / 2);
+      const amp = ps[m] - floor;
+      if (!(amp > 0)) return;
+      const half = floor + amp / 2;
+      let a = m, b = m;
+      while (a > l && ps[a] > half) a--;
+      while (b < r && ps[b] > half) b++;
+      const hw = Math.max(1, Math.min(m - a, b - m));   // the side not lifted by a neighbour
+      const sigma = hw / 1.1774;
+      for (let i = Math.max(0, Math.floor(m - 5 * sigma)); i <= Math.min(n - 1, Math.ceil(m + 5 * sigma)); i++) {
+        out[i] -= amp * Math.exp(-((i - m) ** 2) / (2 * sigma * sigma));
+      }
+    });
+    return out;
+  }
+
+  /** Local maxima that stand at least three times the noise above their surroundings. */
+  function peakList(ps, noise) {
+    const reach = Math.max(10, Math.round(ps.length / 4)), out = [];
+    for (let j = 1; j < ps.length - 1; j++) if (isLocalMax(ps, j) && prominence(ps, j, reach) >= 3 * noise) out.push(j);
+    return out;
+  }
+
   function ownOffsets(q, k) {
     return q.cands.slice().sort((a, b) => b.prom - a.prom).slice(0, k).map(c => c.off).sort((a, b) => a - b);
   }
@@ -505,51 +616,79 @@
   }
 
   function analyzeLane(q, offsets, n, r, img, prm) {
-    const { ps, P, noise } = q;
+    const { ps, P, noise, ov } = q;
     const flags = [];
     const parentProm = ps[P] - minOf(ps);
+    const nearRemoved = i => ov.removed.some(j => Math.abs(j - i) <= 3);
+    if (ov.any) flags.push('manual band assignment');
 
     // Products at the consensus offsets relative to this lane's own parent (handles tilt and smile).
-    const prods = offsets.map((off, k) => {
+    // A product chosen by hand wins; a removed band is never picked.
+    const slots = ov.products.some(i => i != null) ? prm.products : Math.min(offsets.length, prm.products);
+    const prods = [];
+    for (let k = 0; k < slots; k++) {
+      const fixed = ov.products[k];
+      if (fixed != null) { prods.push({ y: fixed, found: true, fixed: true }); continue; }
+      const off = offsets[k];
+      if (off == null) continue;
       const lo = k === 0 ? Math.max(P + 3, P + off - (3 + 0.15 * off)) : P + (offsets[k - 1] + off) / 2;
       const hi = k === offsets.length - 1 ? P + off + 3 + 0.15 * off : P + (off + offsets[k + 1]) / 2;
-      const c = argmax(ps, Math.round(lo), Math.round(hi));
+      let c = -1;
+      for (let i = Math.max(0, Math.round(lo)); i <= Math.min(n - 1, Math.round(hi)); i++) {
+        if (!nearRemoved(i) && (c < 0 || ps[i] > ps[c])) c = i;
+      }
+      if (ov.removed.length && !(c > Math.round(lo) && c < Math.round(hi) && isLocalMax(ps, c))) {
+        // Next to a removed band the window maximum can be that band's tail: take the highest real peak instead.
+        let best = -1;
+        for (let i = Math.max(1, Math.round(lo) + 1); i < Math.min(n - 1, Math.round(hi)); i++) {
+          if (!nearRemoved(i) && isLocalMax(ps, i) && (best < 0 || ps[i] > ps[best])) best = i;
+        }
+        if (best > 0) c = best;
+      }
       const found = c > P && c < n - 1 && isLocalMax(ps, c) && c > Math.round(lo) && c < Math.round(hi);
-      return { y: found ? c : Math.min(n - 1, Math.round(P + off)), found };
-    });
+      prods.push({ y: found ? c : Math.min(n - 1, Math.round(P + off)), found });
+    }
 
-    // Valleys bracketing each band.
+    // Bands in gel order: parent, products and removed bands inside the measured range.
     const peaks = [P].concat(prods.map(x => x.y));
+    const lowest = Math.max(...peaks);
+    const bands = peaks.map((y, i) => ({ y, kind: i }))
+      .concat(ov.removed.filter(y => y > P + 2 && y < lowest - 2 && !peaks.some(p => Math.abs(p - y) <= 2)).map(y => ({ y, kind: -1 })))
+      .sort((a, b) => a.y - b.y || a.kind - b.kind);
+    const ys = bands.map(b => b.y);
+    const removedIn = bands.filter(b => b.kind < 0).map(b => b.y);
+    const pm = removedIn.length ? withoutBands(ps, removedIn) : ps;   // profile used for valleys and areas
     let valleys;
-    const manual = !!(q.lane.valleys && q.lane.valleys.length === peaks.length + 1);
+    const manual = !!(q.lane.valleys && q.lane.valleys.length === bands.length + 1);
     if (manual) {
       valleys = q.lane.valleys.map(v => Math.min(n - 1, Math.max(0, Math.round(v - r.y0)))).sort((a, b) => a - b);
       flags.push('manual band boundaries');
     } else {
-      const firstGap = peaks.length > 1 ? peaks[1] - peaks[0] : Math.max(6, Math.round(n * 0.15));
-      valleys = [argmin(ps, P - firstGap, P)];
-      for (let i = 0; i < peaks.length - 1; i++) valleys.push(argmin(ps, peaks[i], peaks[i + 1]));
-      const lastGap = peaks.length > 1 ? peaks[peaks.length - 1] - peaks[peaks.length - 2] : firstGap;
-      valleys.push(argmin(ps, peaks[peaks.length - 1], peaks[peaks.length - 1] + lastGap));
+      const firstGap = ys.length > 1 ? ys[1] - ys[0] : Math.max(6, Math.round(n * 0.15));
+      valleys = [argmin(pm, ys[0] - firstGap, ys[0])];
+      for (let i = 0; i < ys.length - 1; i++) valleys.push(argmin(pm, ys[i], ys[i + 1]));
+      const lastGap = ys.length > 1 ? ys[ys.length - 1] - ys[ys.length - 2] : firstGap;
+      valleys.push(argmin(pm, ys[ys.length - 1], ys[ys.length - 1] + lastGap));
       for (let i = 1; i < valleys.length; i++) if (valleys[i] < valleys[i - 1]) valleys[i] = valleys[i - 1];
     }
 
-    const nodes = baselineNodes(ps, valleys, prm.background, prm.blendK);
+    const nodes = baselineNodes(pm, valleys, prm.background, prm.blendK);
     const baseline = interpBaseline(n, valleys, nodes);
-    const areas = [];
+    const areas = peaks.map(() => 0);
     for (let s = 0; s < valleys.length - 1; s++) {
       let sum = 0;
       const end = s === valleys.length - 2 ? valleys[s + 1] : valleys[s + 1] - 1;
-      for (let i = valleys[s]; i <= end; i++) sum += Math.max(0, ps[i] - baseline[i]);
-      areas.push(sum);
+      for (let i = valleys[s]; i <= end; i++) sum += Math.max(0, pm[i] - baseline[i]);
+      if (bands[s].kind >= 0) areas[bands[s].kind] = sum;   // a removed band's area is not counted
     }
+    const segKinds = bands.map(b => b.kind);
     prods.forEach((x, k) => {
       if (!x.found && !manual) { areas[k + 1] = 0; flags.push('product ' + (k + 1) + ' not detected'); }
     });
 
     const heights = peaks.map((y, i) => ps[y] - (isNaN(baseline[y]) ? nodes[Math.min(i, nodes.length - 1)] : baseline[y]));
-    const faint = prods.map((x, k) => x.found && heights[k + 1] < prm.faintSNR * noise);
-    if (prods.length === 2 && !manual && prods[0].found !== prods[1].found && faint[0] !== faint[1]) {
+    const faint = prods.map((x, k) => x.found && !x.fixed && heights[k + 1] < prm.faintSNR * noise);
+    if (prods.length === 2 && !manual && !ov.any && prods[0].found !== prods[1].found && faint[0] !== faint[1]) {
       // A single faint "product" without its partner is noise, as in an uncut control.
       const k = faint[0] ? 0 : 1;
       prods[k].found = false; faint[k] = false; areas[k + 1] = 0;
@@ -586,7 +725,7 @@
       } else if (P <= Math.max(3, 0.06 * n)) {
         flags.push('band at the top of the box: a well?');
       }
-      const isPeak = j => peaks.some(y => Math.abs(y - j) <= 4);
+      const isPeak = j => peaks.some(y => Math.abs(y - j) <= 4) || nearRemoved(j);
       for (let j = valleys[0] + 1; j < last; j++) {
         if (!isPeak(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.04 * hP)) { flags.push('unassigned band inside the measured range'); break; }
       }
@@ -597,12 +736,18 @@
       if (q.extraBand) flags.push('extra band not matching the cleavage products');
     }
     let role = q.lane.role;
-    if (!role && q.ladderLike) role = 'marker';
+    if (!role && ov.any) role = 'sample';   // bands chosen by hand: the user treats this lane as a sample
+    if (!role && q.ladderLike) {
+      // Ladders sit at the ends of a row; an interior lane with extra strong bands is a sample with an extra band.
+      if (q.isEnd || q.rowLanes < 3) role = 'marker';
+      else { role = 'sample'; flags.push('extra band not matching the cleavage products'); }
+    }
     if (!role) {
       role = 'sample';
       const matches = j => Math.abs(j - P) <= 4 || offsets.some(off => Math.abs(j - P - off) <= 3 + 0.15 * off) ||
         (prm.products === 1 && offsets.length === 1 && j - P > offsets[0]);   // the second product, not a ladder band
-      for (let j = 1; j < n - 1; j++) {
+      // Ladders sit at the ends of a row: interior lanes are samples unless ladder-like.
+      for (let j = 1; (q.isEnd || q.rowLanes < 3) && j < n - 1; j++) {
         if (!isLocalMax(ps, j) || matches(j)) continue;
         if (prominence(ps, j, Math.max(10, Math.round(n / 4))) >= 0.25 * parentProm) { role = 'marker'; break; }
       }
@@ -614,7 +759,8 @@
 
     return {
       x: q.lane.x, a: q.a, b: q.b, y0: r.y0,
-      profile: ps, baseline, valleys, peaks, found: [true].concat(prods.map(x => x.found)),
+      profile: ps, corrected: removedIn.length ? pm : null, baseline, valleys, peaks, found: [true].concat(prods.map(x => x.found)), segKinds,
+      fixed: [q.parentFixed].concat(prods.map(x => !!x.fixed)), removed: ov.removed.slice(), candidates: peakList(ps, noise),
       areas, heights, fc, role, flags, noise, saturated: sat, parentProm,
       autoRole: !q.lane.role, ladderLike: !!q.ladderLike,
       editing: NaN, fcCorrected: fc
