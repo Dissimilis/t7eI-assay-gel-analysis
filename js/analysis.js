@@ -58,9 +58,11 @@
 
   /** Dark bands on a light ground when the median is above mid-grey. */
   function detectPolarity(img) {
-    const step = Math.max(1, Math.floor(img.gray.length / 20000));
+    // Sample the central 60% so a black or white surround around the gel does not decide it.
+    const x0 = Math.floor(img.w * 0.2), x1 = Math.ceil(img.w * 0.8), y0 = Math.floor(img.h * 0.2), y1 = Math.ceil(img.h * 0.8);
+    const step = Math.max(1, Math.floor(Math.sqrt((x1 - x0) * (y1 - y0) / 20000)));
     const s = [];
-    for (let i = 0; i < img.gray.length; i += step) s.push(img.gray[i]);
+    for (let y = y0; y < y1; y += step) for (let x = x0; x < x1; x += step) s.push(img.gray[y * img.w + x]);
     return median(s) > 127 ? 'dark' : 'light';
   }
 
@@ -118,6 +120,12 @@
     const d = [];
     for (let i = 1; i < p.length; i++) d.push(Math.abs(p[i] - p[i - 1]));
     return (1.4826 * median(d)) / Math.SQRT2;
+  }
+
+  function minOf(p) {
+    let m = Infinity;
+    for (let i = 0; i < p.length; i++) if (p[i] < m) m = p[i];
+    return m;
   }
 
   function argmax(p, a, b) {
@@ -283,8 +291,9 @@
 
   /** Candidate product offsets (px below the parent) in one smoothed profile. */
   function productCandidates(ps, P, noise) {
-    const height = ps[P] - Math.min(...ps);
-    const minProm = Math.max(3 * noise, 0.04 * height);
+    const height = ps[P] - minOf(ps);
+    // Faint products next to a strong parent are typical of low editing: the noise floor matters most.
+    const minProm = Math.max(3 * noise, 0.015 * height);
     const out = [];
     for (let j = P + 4; j < ps.length - 1; j++) {
       if (!isLocalMax(ps, j)) continue;
@@ -295,21 +304,21 @@
   }
 
   /** Cluster offsets from all lanes of a row; keep the `k` most frequent. */
-  function consensusOffsets(lists, k) {
+  function consensusOffsets(lists, k, minLanes) {
     const all = [];
-    lists.forEach((l, lane) => l.forEach(c => all.push({ off: c.off, lane })));
+    lists.forEach((l, lane) => l.forEach(c => all.push({ off: c.off, prom: c.prom, lane })));
     all.sort((a, b) => a.off - b.off);
     const clusters = [];
     for (const it of all) {
       const c = clusters[clusters.length - 1];
-      if (c && it.off - c.items[c.items.length - 1] <= 3 + 0.1 * it.off) { c.items.push(it.off); c.lanes.add(it.lane); }
-      else clusters.push({ items: [it.off], lanes: new Set([it.lane]) });
+      if (c && it.off - c.items[c.items.length - 1] <= 3 + 0.1 * it.off) { c.items.push(it.off); c.lanes.add(it.lane); c.prom += it.prom; }
+      else clusters.push({ items: [it.off], lanes: new Set([it.lane]), prom: it.prom });
     }
     const lanes = lists.length;
-    const minCount = lanes >= 3 ? Math.max(2, Math.ceil(0.25 * lanes)) : 1;
+    const minCount = minLanes != null ? minLanes : lanes >= 3 ? Math.max(2, Math.ceil(0.25 * lanes)) : 1;
     return clusters
       .filter(c => c.lanes.size >= minCount)
-      .sort((a, b) => b.lanes.size - a.lanes.size)
+      .sort((a, b) => b.lanes.size - a.lanes.size || b.prom - a.prom)
       .slice(0, k)
       .map(c => median(c.items))
       .sort((a, b) => a - b);
@@ -383,14 +392,64 @@
     if (usable.length >= 3) {
       offsets = consensusOffsets(usable.map(q => q.cands), prm.products);
       if (offsets.length < prm.products) {
-        // Fall back to the strongest candidates of the most cleaved-looking lane.
+        // Keep the agreed positions and add the next most common ones, seen in at least two lanes.
+        const lists = usable.map(q => q.cands);
+        const extra = consensusOffsets(lists, 8, 2).filter(o => !offsets.some(e => Math.abs(e - o) <= 3 + 0.15 * Math.max(e, o)));
+        offsets = offsets.concat(extra).slice(0, prm.products).sort((a, b) => a - b);
+      }
+      if (!offsets.length) {
+        // Nothing shared at all: use the strongest candidates of the most cleaved-looking lane.
         const best = usable.slice().sort((a, b) => sumProm(b.cands) - sumProm(a.cands))[0];
         offsets = ownOffsets(best, prm.products);
       }
     }
+    if (offsets && offsets.length) {
+      // The true parent is the band from which the products sit at the shared offsets. This finds a
+      // faint parent above about 65% editing and passes over a well or stray band above it.
+      pre.forEach(q => {
+        if (q.lane.role === 'marker' || q.lane.role === 'excluded' || q.ladderLike) return;
+        const P = bestParent(q, offsets, n);
+        if (P !== q.P) { q.P = P; q.cands = productCandidates(q.ps, P, q.noise); }
+      });
+    }
     // With fewer than three lanes there is no majority to vote: each lane uses its own strongest products.
     const lanes = pre.map(q => analyzeLane(q, offsets || ownOffsets(q, prm.products), n, r, img, prm));
+
+    const auto = lanes.filter(l => l.autoRole);
+    const autoMarkers = auto.filter(l => l.role === 'marker' && !l.ladderLike);
+    if (auto.length >= 3 && autoMarkers.length > auto.length / 2) {
+      // Most lanes cannot be ladders: the extra band is shared (a primer dimer or second PCR product).
+      autoMarkers.forEach(l => { l.role = 'sample'; l.flags.push('extra band not matching the cleavage products'); });
+    }
+    const samples = lanes.filter(l => l.role === 'sample');
+    const brighter = samples.filter(l => l.flags.includes('cleavage product brighter than parent'));
+    if (samples.length >= 3 && brighter.length > samples.length / 2) {
+      // Rare in a real row; usually the box includes wells or a band above the parents.
+      brighter.forEach(l => l.flags.push('check band assignment'));
+    }
     return { region: r, pitch, half, offsets: offsets || [], shared: !!offsets, lanes };
+  }
+
+  /** Parent candidate whose product offsets match the most bands; ties keep the first-pass choice. */
+  function bestParent(q, offsets, n) {
+    const { ps, noise } = q;
+    const reach = Math.max(10, Math.round(n / 4));
+    const top = argmax(ps, 0, n - 1);
+    const ref = prominence(ps, top, reach);
+    const cands = [q.P, top];
+    for (let j = 1; j < n - 1; j++) {
+      if (j !== q.P && j !== top && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.05 * ref)) cands.push(j);
+    }
+    const score = P => offsets.reduce((s, off) => {
+      const tol = 3 + 0.15 * off;
+      for (let j = Math.max(1, Math.round(P + off - tol)); j <= Math.min(n - 2, Math.round(P + off + tol)); j++) {
+        if (isLocalMax(ps, j) && prominence(ps, j, reach) >= 3 * noise) return s + 1;
+      }
+      return s;
+    }, 0);
+    let best = q.P, bestScore = score(q.P);
+    for (const c of cands) { const sc = score(c); if (sc > bestScore) { best = c; bestScore = sc; } }
+    return best;
   }
 
   function sumProm(c) { return c.reduce((s, x) => s + x.prom, 0); }
@@ -416,7 +475,7 @@
 
   /** Local maxima (including the parent) with at least a quarter of the parent's height. */
   function strongPeaks(ps, P, n) {
-    const parentProm = ps[P] - Math.min(...ps);
+    const parentProm = ps[P] - minOf(ps);
     const out = [P];
     for (let j = 1; j < n - 1; j++) {
       if (Math.abs(j - P) <= 4 || !isLocalMax(ps, j)) continue;
@@ -428,7 +487,7 @@
   function analyzeLane(q, offsets, n, r, img, prm) {
     const { ps, P, noise } = q;
     const flags = [];
-    const parentProm = ps[P] - Math.min(...ps);
+    const parentProm = ps[P] - minOf(ps);
 
     // Products at the consensus offsets relative to this lane's own parent (handles tilt and smile).
     const prods = offsets.map((off, k) => {
@@ -479,7 +538,8 @@
     prods.forEach((x, k) => { if (faint[k]) flags.push('product ' + (k + 1) + ' faint'); });
     if (!offsets.length) flags.push('no cleavage products found');
     // Cleavage always yields both fragments: one without the other points to a non-specific band.
-    if (prods.length === 2 && prods[0].found !== prods[1].found && !manual) flags.push('only one cleavage product found');
+    if (!manual && ((prods.length === 2 && prods[0].found !== prods[1].found) ||
+        (prm.products === 2 && prods.length === 1 && prods[0].found))) flags.push('only one cleavage product found');
     if (P !== argmax(ps, 0, n - 1)) flags.push('cleavage product brighter than parent');
     if (prm.products === 1 && offsets.length === 1 &&
         q.cands.some(c => c.off > offsets[0] + 3 + 0.15 * offsets[0] && c.prom >= 0.1 * parentProm)) {
@@ -488,7 +548,8 @@
 
     const sat = clippedShare(img, prm.polarity, q.a, q.b, r.y0 + P);
     if (sat > prm.satFraction) flags.push('parent saturated');
-    if (ps[argmax(ps, 0, n - 1)] - Math.min(...ps) < Math.max(8 * noise, 10)) flags.push('weak lane');
+    if (prods.some(x => x.found && clippedShare(img, prm.polarity, q.a, q.b, r.y0 + x.y) > prm.satFraction)) flags.push('product saturated');
+    if (ps[argmax(ps, 0, n - 1)] - minOf(ps) < Math.max(8 * noise, 10)) flags.push('weak lane');
 
     // Automatic role: a ladder has strong bands that match neither the parent nor the products.
     if (P <= 1 || P >= n - 2) flags.push('band touches region edge');
@@ -496,7 +557,8 @@
     if (!role && q.ladderLike) role = 'marker';
     if (!role) {
       role = 'sample';
-      const matches = j => Math.abs(j - P) <= 4 || offsets.some(off => Math.abs(j - P - off) <= 3 + 0.15 * off);
+      const matches = j => Math.abs(j - P) <= 4 || offsets.some(off => Math.abs(j - P - off) <= 3 + 0.15 * off) ||
+        (prm.products === 1 && offsets.length === 1 && j - P > offsets[0]);   // the second product, not a ladder band
       for (let j = 1; j < n - 1; j++) {
         if (!isLocalMax(ps, j) || matches(j)) continue;
         if (prominence(ps, j, Math.max(10, Math.round(n / 4))) >= 0.25 * parentProm) { role = 'marker'; break; }
@@ -511,6 +573,7 @@
       x: q.lane.x, a: q.a, b: q.b, y0: r.y0,
       profile: ps, baseline, valleys, peaks, found: [true].concat(prods.map(x => x.found)),
       areas, heights, fc, role, flags, noise, saturated: sat, parentProm,
+      autoRole: !q.lane.role, ladderLike: !!q.ladderLike,
       editing: NaN, fcCorrected: fc
     };
   }
@@ -525,7 +588,12 @@
     const sig = signal || signalImage(img, prm.polarity);
     const out = rows.map(row => analyzeRow(sig, img, row, prm));
     const nc = [];
-    out.forEach(r => r.lanes.forEach(l => { if (l.role === 'nc') nc.push(l.fc); }));
+    let ncSaturated = 0;
+    out.forEach(r => r.lanes.forEach(l => {
+      if (l.role !== 'nc') return;
+      if (l.flags.includes('parent saturated')) ncSaturated++;   // a clipped control overstates background cutting
+      else nc.push(l.fc);
+    }));
     const ncFc = nc.length ? nc.reduce((s, v) => s + v, 0) / nc.length : 0;
     out.forEach(r => r.lanes.forEach(l => {
       if (l.role === 'marker' || l.role === 'excluded') { l.editing = NaN; l.flags = []; return; }
@@ -533,7 +601,7 @@
       l.editing = editing(l.fcCorrected, prm.formula);
       if (prm.formula === 'single' && l.fcCorrected > 0.5) l.flags.push('fraction cleaved > 0.5: single-allele model invalid');
     }));
-    return { rows: out, ncFc, ncCount: nc.length };
+    return { rows: out, ncFc, ncCount: nc.length, ncSaturated };
   }
 
   return {

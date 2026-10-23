@@ -13,9 +13,9 @@
     stage: document.querySelector('.stage'), img: $('imgCanvas'), ov: $('ovCanvas'), empty: $('emptyMsg'),
     rowsBar: $('rowsBar'), meta: $('imgMeta'),
     laneWidth: $('laneWidth'), laneWidthVal: $('laneWidthVal'), smoothing: $('smoothing'), smoothingVal: $('smoothingVal'),
-    subtractNC: $('subtractNC'), resetParams: $('resetParams'),
+    resetParams: $('resetParams'),
     chips: $('laneChips'), selTitle: $('selTitle'), prof: $('profCanvas'),
-    roleSeg: $('roleSeg'), autoRole: $('autoRole'), resetBands: $('resetBands'), removeLane: $('removeLane'),
+    resetBands: $('resetBands'), removeLane: $('removeLane'), zoomBtn: $('zoomBtn'),
     stParent: $('stParent'), stFc: $('stFc'), stEd: $('stEd'), selFlags: $('selFlags'),
     resBody: $('resBody'), resHint: $('resHint')
   };
@@ -23,7 +23,7 @@
   const state = {
     img: null, name: '', sig: null, sigPolarity: null,
     rows: [], result: null, sel: null, nextId: 1,
-    params: loadParams(), drag: null, message: ''
+    params: loadParams(), drag: null, message: '', profZoom: false
   };
 
   // ------------------------------------------------------------ parameters
@@ -47,6 +47,7 @@
     d.blendK = clamp(d.blendK, 0.02, 1);
     d.faintSNR = clamp(d.faintSNR, 1, 10);
     d.satFraction = clamp(d.satFraction, 0, 0.5);
+    d.subtractNC = false;   // no lane roles in this interface, so no NC lanes to subtract
     return d;
   }
 
@@ -310,7 +311,6 @@
     els.laneWidthVal.textContent = Math.round(p.laneWidth * 100);
     els.smoothing.value = p.smoothing;
     els.smoothingVal.textContent = p.smoothing.toFixed(1);
-    els.subtractNC.checked = p.subtractNC;
   }
 
   function renderMeta() {
@@ -319,7 +319,6 @@
     if (img) {
       parts.push(img.w + ' × ' + img.h + ' px, ' + img.bits + '-bit' + (img.lossy ? ' JPEG (lossy: prefer a raw TIFF for quantification)' : '') +
         (img.saturationUnknown ? ' (floating point: saturation cannot be checked)' : ''));
-      if (state.result && state.result.ncCount) parts.push('NC mean fraction cleaved ' + state.result.ncFc.toFixed(3) + (state.params.subtractNC ? ' (subtracted)' : ''));
     }
     els.meta.textContent = parts.join(' · ');
     if (state.message) {
@@ -434,24 +433,21 @@
     const r = s && resLane(s.ri, s.li), lane = s && laneAt(s.ri, s.li);
     const labs = labels();
     els.selTitle.textContent = s ? 'Row ' + (s.ri + 1) + ' · Lane ' + labs[s.ri][s.li] : '—';
-    els.roleSeg.querySelectorAll('input').forEach(inp => { inp.checked = !!r && r.role === inp.value; inp.disabled = !r; });
-    els.autoRole.disabled = !lane || lane.role === null;
     els.resetBands.disabled = !lane || !lane.valleys;
     els.removeLane.disabled = !lane;
     const quant = r && r.role !== 'marker' && r.role !== 'excluded';
     els.stParent.textContent = quant ? fmtInt(r.areas[0]) : '—';
-    els.stFc.textContent = quant ? r.fcCorrected.toFixed(3) : '—';
+    els.stFc.textContent = quant ? r.fc.toFixed(3) : '—';
     els.stEd.textContent = quant ? fmtPct(r.editing) + (r.flags.includes('parent saturated') ? ' ⚠' : '') : '—';
     els.selFlags.textContent = '';
     if (r) {
       const flags = r.flags.slice();
       if (r.role === 'marker') flags.unshift('marker lane: not quantified');
-      if (r.role === 'excluded') flags.unshift('excluded');
-      if (lane.role === null) flags.push('role: automatic');
-      if (r.flags.includes('parent saturated')) flags.push('clipped parent reads high: % editing is an upper bound');
+      if (r.flags.includes('product saturated')) flags.push('clipped bands: % editing is unreliable');
+      else if (r.flags.includes('parent saturated')) flags.push('clipped parent reads high: % editing is an upper bound');
       flags.forEach(f => {
         const t = document.createElement('span');
-        t.className = 'flag' + (isWarn(f) || /upper bound/.test(f) ? ' warn' : '');
+        t.className = 'flag' + (isWarn(f) || /upper bound|unreliable/.test(f) ? ' warn' : '');
         t.textContent = f;
         els.selFlags.appendChild(t);
       });
@@ -466,6 +462,12 @@
     const n = r.profile.length;
     let lo = Infinity, hi = -Infinity;
     for (const v of r.profile) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    if (state.profZoom && r.valleys && r.valleys.length > 2) {
+      // Scale to the cleavage products; the parent peak runs off the top of the plot.
+      hi = -Infinity;
+      for (let i = r.valleys[1]; i < n; i++) hi = Math.max(hi, r.profile[i]);
+      hi += (hi - lo) * 0.25;
+    }
     lo = Math.floor(lo - 2); hi = Math.ceil(hi + (hi - lo) * 0.08 + 2);
     const pw = w - PAD.l - PAD.r, ph = h - PAD.t - PAD.b;
     return {
@@ -501,7 +503,9 @@
     x.textAlign = 'center'; x.textBaseline = 'top';
     for (let t = 0; t <= ticks; t++) { const i = Math.round((S.n - 1) * t / ticks); x.fillText(i, S.X(i), S.h - PAD.b + 6); }
     x.globalAlpha = 1;
-    // band areas
+    // band areas, clipped to the plot so a zoomed-out parent stays inside the frame
+    x.save();
+    x.beginPath(); x.rect(PAD.l, PAD.t, S.w - PAD.l - PAD.r, S.h - PAD.t - PAD.b); x.clip();
     const quant = r.role !== 'marker' && r.role !== 'excluded';
     if (quant) {
       for (let s = 0; s < r.valleys.length - 1; s++) {
@@ -522,13 +526,14 @@
     x.strokeStyle = col.text; x.lineWidth = 1.5; x.beginPath();
     for (let i = 0; i < S.n; i++) x.lineTo(S.X(i), S.Y(p[i]));
     x.stroke();
+    x.restore();
     if (!quant) return;
     // band labels and boundary handles
     x.font = '600 12px "Barlow Condensed", sans-serif'; x.textAlign = 'center'; x.textBaseline = 'bottom';
     r.peaks.forEach((pk, k) => {
       x.fillStyle = k === 0 ? col.acc7 : col.acc;
       x.globalAlpha = r.found[k] ? 1 : 0.45;
-      x.fillText(k === 0 ? 'P' : String(k), S.X(pk), S.Y(p[pk]) - 3);
+      x.fillText(k === 0 ? 'P' : String(k), S.X(pk), Math.max(PAD.t + 12, S.Y(p[pk]) - 3));
     });
     x.globalAlpha = 1;
     r.valleys.forEach((v, k) => {
@@ -567,18 +572,10 @@
       inp.setAttribute('aria-label', 'Lane label');
       inp.addEventListener('change', () => { lane.label = inp.value.trim(); render(); });
       td(inp);
-      const selEl = document.createElement('select');
-      selEl.setAttribute('aria-label', 'Lane role');
-      [['auto', 'Auto (' + r.role + ')'], ['sample', 'Sample'], ['nc', 'NC'], ['marker', 'Marker'], ['excluded', 'Exclude']].forEach(([v, t]) => {
-        const o = document.createElement('option'); o.value = v; o.textContent = t; selEl.appendChild(o);
-      });
-      selEl.value = lane.role || 'auto';
-      selEl.addEventListener('change', () => { lane.role = selEl.value === 'auto' ? null : selEl.value; recompute(); });
-      td(selEl);
       td(quant ? fmtInt(r.areas[0]) : '—', 'num');
       td(quant ? fmtInt(r.areas[1]) : '—', 'num');
       td(quant && r.areas.length > 2 ? fmtInt(r.areas[2]) : '—', 'num');
-      td(quant ? r.fcCorrected.toFixed(3) : '—', 'num');
+      td(quant ? r.fc.toFixed(3) : '—', 'num');
       const ed = td(quant ? fmtPct(r.editing) : '—', 'num ed-val');
       if (r.flags.includes('parent saturated')) ed.classList.add('sat');
       const bar = document.createElement('div'); bar.className = 'bar';
@@ -598,7 +595,7 @@
     }));
     const p = state.params;
     els.resHint.textContent = count
-      ? (p.formula === 'single' ? 'Single-allele formula' : 'Guschin formula') + ' · ' + { valley: 'valley', blend: 'blend', envelope: 'envelope' }[p.background] + ' baseline' + (p.subtractNC ? ' · NC subtracted' : '')
+      ? (p.formula === 'single' ? 'Single-allele formula' : 'Guschin formula') + ' · ' + { valley: 'valley', blend: 'blend', envelope: 'envelope' }[p.background] + ' baseline'
       : '';
   }
 
@@ -780,7 +777,6 @@
 
   els.laneWidth.addEventListener('input', () => { state.params.laneWidth = Number(els.laneWidth.value) / 100; saveParams(); recomputeSoon(); });
   els.smoothing.addEventListener('input', () => { state.params.smoothing = Number(els.smoothing.value); saveParams(); recomputeSoon(); });
-  els.subtractNC.addEventListener('change', () => { state.params.subtractNC = els.subtractNC.checked; saveParams(); recompute(); });
   els.resetParams.addEventListener('click', () => {
     const oldPol = state.params.polarity, oldProducts = state.params.products;
     state.params = Object.assign({}, T.DEFAULTS, { polarity: state.img ? T.detectPolarity(state.img) : oldPol });
@@ -790,15 +786,13 @@
     recompute();
   });
 
-  els.roleSeg.addEventListener('change', e => {
-    const s = selIndex();
-    if (!s) return;
-    laneAt(s.ri, s.li).role = e.target.value;
-    recompute();
-  });
-  els.autoRole.addEventListener('click', () => { const s = selIndex(); if (s) { laneAt(s.ri, s.li).role = null; recompute(); } });
   els.resetBands.addEventListener('click', () => { const s = selIndex(); if (s) { laneAt(s.ri, s.li).valleys = null; recompute(); } });
   els.removeLane.addEventListener('click', removeSelectedLane);
+  els.zoomBtn.addEventListener('click', () => {
+    state.profZoom = !state.profZoom;
+    els.zoomBtn.setAttribute('aria-pressed', String(state.profZoom));
+    renderLane();
+  });
 
   // Parameter help: hover or keyboard focus shows a tip; a click or tap pins it until Escape or a click elsewhere.
   const infoButtons = Array.from(document.querySelectorAll('.info'));
@@ -872,14 +866,14 @@
     note('T7E1 Gel Analysis ' + VERSION);
     note('file: ' + state.name + '; exported ' + new Date().toISOString());
     note('formula: ' + (p.formula === 'single' ? 'single allele 100*(1-sqrt(1-2f))/2' : 'Guschin 2010 100*(1-sqrt(1-f))') + '; f = (cut1+cut2)/(parent+cut1+cut2)');
-    note('background: ' + p.background + '; lane width: ' + Math.round(p.laneWidth * 100) + '% of pitch; smoothing sigma: ' + p.smoothing + ' px; products: ' + p.products + '; NC subtracted: ' + (p.subtractNC ? 'yes (mean NC f ' + state.result.ncFc.toFixed(4) + ')' : 'no'));
-    lines.push(['row', 'lane', 'label', 'role', 'x_px', 'parent_area', 'cut1_area', 'cut2_area', 'fraction_cleaved', 'fraction_used', 'editing_pct', 'flags'].join(','));
+    note('background: ' + p.background + '; lane width: ' + Math.round(p.laneWidth * 100) + '% of pitch; smoothing sigma: ' + p.smoothing + ' px; products: ' + p.products);
+    lines.push(['row', 'lane', 'label', 'type', 'x_px', 'parent_area', 'cut1_area', 'cut2_area', 'fraction_cleaved', 'editing_pct', 'flags'].join(','));
     lanesForExport().forEach(e => {
       const r = e.r, quant = r.role !== 'marker' && r.role !== 'excluded';
       const a = quant ? r.areas : [];
       lines.push([e.row, e.lane, csvCell(e.label), r.role, r.x,
         fixed(a[0], 2), fixed(a[1], 2), fixed(a[2], 2),
-        quant ? fixed(r.fc, 4) : '', quant ? fixed(r.fcCorrected, 4) : '', quant ? fixed(r.editing, 2) : '',
+        quant ? fixed(r.fc, 4) : '', quant ? fixed(r.editing, 2) : '',
         csvCell(r.flags.join('; '))].join(','));
     });
     download(new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' }), baseName() + '-t7e1.csv');
@@ -908,18 +902,17 @@
       const cx = (r.a + r.b) / 2;
       x.font = `600 ${14 * u}px "Barlow Condensed", sans-serif`;
       x.textBaseline = 'bottom';
-      label(labs[ri][li], cx, row.y0 - 4 * u, darkGel ? ink : col.acc7);
+      label(labs[ri][li], cx, row.y0 - 4 * u, ink);
       if (r.role === 'marker') return;
       x.textBaseline = 'top';
       x.font = `600 ${15 * u}px "Barlow Condensed", sans-serif`;
-      const sat = r.flags.includes('parent saturated');
-      label(isFinite(r.editing) ? Math.round(r.editing) + (sat ? '*' : '') : '—', cx, row.y1 + 4 * u, sat ? col.warn : ink);
+      label(isFinite(r.editing) ? String(Math.round(r.editing)) : '—', cx, row.y1 + 4 * u, ink);
     }));
     const p = state.params;
     x.textAlign = 'left'; x.textBaseline = 'middle'; x.fillStyle = col.text;
     x.font = `${11 * u}px Barlow, sans-serif`;
     x.fillText('% editing, ' + (p.formula === 'single' ? 'single-allele formula' : 'Guschin formula 100·(1−√(1−f))') + ', ' + p.background + ' baseline' +
-      (p.subtractNC ? ', NC subtracted' : '') + '. * parent band saturated (upper bound). ' + state.name, 10 * u, img.h + foot / 2);
+'. ' + state.name, 10 * u, img.h + foot / 2);
     c.toBlob(b => download(b, baseName() + '-t7e1.png'), 'image/png');
   }
 

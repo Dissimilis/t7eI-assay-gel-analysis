@@ -119,12 +119,12 @@ test('real gel: agreement with hand ImageJ values', { skip: !pgm || !fs.existsSy
 
 // Synthetic lanes on a flat background: [x, % editing], Gaussian bands at y 30/60/95.
 function laneGel(lanes, opts) {
-  const o = Object.assign({ w: 500, h: 140, ladder: null, width: 17 }, opts);
+  const o = Object.assign({ w: 500, h: 140, ladder: null, width: 17, amp: 80 }, opts);
   const g = new Float32Array(o.w * o.h).fill(200);
   const draw = (xc, bands) => {
     for (let x = xc - o.width; x <= xc + o.width; x++) for (let y = 0; y < o.h; y++) {
       let v = 0;
-      bands.forEach(([yc, m]) => { v += 80 * m * Math.exp(-((y - yc) ** 2) / 32); });
+      bands.forEach(([yc, m]) => { v += o.amp * m * Math.exp(-((y - yc) ** 2) / 32); });
       g[y * o.w + x] -= v;
     }
   };
@@ -182,5 +182,15 @@ test('a band shared by every lane at a wrong position is flagged, not silently c
     if (i === 3) return;
     const silent = l.editing > 2 && !l.flags.some(f => /only one|not detected/.test(f));
     assert.ok(!silent, `lane ${i}: ${l.editing.toFixed(1)} with flags ${l.flags.join('; ')}`);
+  });
+});
+
+test('low editing next to a strong parent: the faint lower product is still found', () => {
+  const lanes = [[60, 3], [160, 4], [260, 3], [360, 0]];
+  const row = analyseBox(laneGel(lanes, { amp: 190 }), { x0: 0, x1: 500, y0: 5, y1: 135 });
+  lanes.forEach(([, ed], i) => {
+    const l = row.lanes[i];
+    if (ed) assert.deepEqual(l.found, [true, true, true], `lane ${i} flags ${l.flags.join('; ')}`);
+    assert.ok(Math.abs(l.editing - ed) < 0.5, `lane ${i}: ${l.editing} vs ${ed}`);
   });
 });

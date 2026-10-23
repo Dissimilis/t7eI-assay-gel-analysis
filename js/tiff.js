@@ -197,11 +197,24 @@
     const sample = bps === 8 ? i => raw[i] : bps === 16 ? i => rdv.getUint16(2 * i, le) : i => rdv.getFloat32(4 * i, le);
     const total = w * h * spp;
     let lo = 0, hi = 255, bits = bps;
+    let clipTop = null, clipBottom = null, quantum = 1;
     if (bps === 16) {
-      // Cameras often store 12- or 14-bit data in 16-bit files: scale by the range actually used.
-      let max = 0;
-      for (let i = 0; i < total; i++) { const v = sample(i); if (v > max) max = v; }
-      bits = [10, 12, 14, 16].find(b => max <= 2 ** b - 1);
+      // Cameras often store 12- or 14-bit data in 16-bit files, right- or left-aligned. A sensor
+      // that clipped leaves a pile of pixels at one value: that value is the real ceiling.
+      const hist = new Uint32Array(65536);
+      let max = 0, min = 65535, used = 0;
+      for (let i = 0; i < total; i++) { const v = sample(i); hist[v]++; used |= v; if (v > max) max = v; if (v < min) min = v; }
+      quantum = used ? used & -used : 1;   // left-aligned 12-bit data only uses every 16th value
+      const pile = (v, dir) => {
+        if (hist[v] < Math.max(20, total * 2e-5)) return false;
+        let sum = 0, n = 0;
+        for (let k = 1; k <= 8; k++) { const u = v - dir * k * quantum; if (u < 0 || u > 65535) break; sum += hist[u]; n++; }
+        return n > 0 && hist[v] > 5 * (sum / n) + 5;
+      };
+      for (let v = max; v >= 0.15 * max && v > min; v -= quantum) if (hist[v] && pile(v, 1)) { clipTop = v; break; }
+      if (pile(min, -1)) clipBottom = min;
+      const ceiling = clipTop != null ? clipTop : max;
+      bits = [10, 12, 14, 16].find(b => ceiling <= 2 ** b - 1);
       hi = 2 ** bits - 1;
     } else if (bps === 32) {
       lo = Infinity; hi = -Infinity;
@@ -221,8 +234,14 @@
       // Float data has no fixed full scale, so clipping cannot be detected.
       return { w, h, gray, bits, clipLow: -Infinity, clipHigh: Infinity, saturationUnknown: true };
     }
-    const step = scale;   // one raw unit on the 0-255 scale
-    return { w, h, gray, bits, clipLow: bps === 8 ? 3 : 0.5 * step, clipHigh: bps === 8 ? 252 : 255 - 0.5 * step };
+    if (bps === 8) return { w, h, gray, bits, clipLow: 3, clipHigh: 252 };
+    const half = 0.5 * quantum * scale;   // half a raw step on the 0-255 scale
+    const toGray = v => (photometric === 0 ? 255 - v * scale : v * scale);
+    let clipLow = half, clipHigh = 255 - half;
+    // Map raw piles to the grey scale; WhiteIsZero swaps which end is which.
+    const ends = [clipTop, clipBottom].filter(v => v != null).map(toGray);
+    ends.forEach(g => { if (g > 127) clipHigh = Math.min(clipHigh, g - half); else clipLow = Math.max(clipLow, g + half); });
+    return { w, h, gray, bits, clipLow, clipHigh };
   }
 
   return { isTiff, decode, lzw, packBits };

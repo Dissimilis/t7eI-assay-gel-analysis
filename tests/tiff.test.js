@@ -68,3 +68,10 @@ test('rejects huge declared dimensions before allocating', async () => {
   });
   await assert.rejects(TIFF.decode(b.buffer.slice(b.byteOffset, b.byteOffset + b.length)), /megapixels/);
 });
+
+test('a clipped 12-bit band in a left-aligned 16-bit file counts as saturated', async () => {
+  const img = await TIFF.decode(load('clip12-left.tif'));
+  const w = img.w;
+  assert.ok(img.gray[15 * w + 40] >= img.clipHigh, 'pile at the ceiling is clipped');
+  assert.ok(img.gray[30 * w + 100] < img.clipHigh, 'ordinary pixels are not');
+});

@@ -155,3 +155,4 @@ a:hover { color: var(--color-accent-800); }
 .lane-tools .field-head { margin: 0; }
 .field-inline .field-head { margin: 0; }
 .lane-tools .tip { left: auto; right: 0; }
+.zoom[aria-pressed="true"] { background: var(--color-accent); color: var(--color-bg); border-color: var(--color-accent); }

@@ -85,7 +85,6 @@
           <input type="range" id="smoothing" min="0" max="4" step="0.5" class="range">
         </div>
         <div class="field field-inline">
-          <div class="field-head"><label class="check"><input type="checkbox" id="subtractNC"><span class="box"></span>Subtract NC background</label><button type="button" class="info" aria-label="About NC subtraction" aria-describedby="tip-subtractNC"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-subtractNC">Subtracts the fraction cut in the uncut control lanes (role NC) from every sample before the formula. This removes background cutting by T7E1 that is not caused by editing. It needs at least one lane set to NC and lowers every sample slightly.</span></div>
           <button class="btn btn-ghost" id="resetParams" type="button">Reset defaults</button>
         </div>
       </div>
@@ -108,14 +107,7 @@
         </div>
       </div>
       <div class="lane-tools">
-        <div class="seg" id="roleSeg">
-          <label class="seg-opt"><input type="radio" name="role" value="sample">Sample</label>
-          <label class="seg-opt"><input type="radio" name="role" value="nc">NC</label>
-          <label class="seg-opt"><input type="radio" name="role" value="marker">Marker</label>
-          <label class="seg-opt"><input type="radio" name="role" value="excluded">Exclude</label>
-        </div>
-        <div class="field-head"><button type="button" class="info" aria-label="About lane roles" aria-describedby="tip-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-role"><strong>Sample</strong>: quantified. <strong>NC</strong>: uncut control, used by NC subtraction. <strong>Marker</strong>: DNA ladder, not quantified. <strong>Exclude</strong>: ignored. <strong>Auto role</strong> gives the decision back to the analysis.</span></div>
-        <button class="btn btn-ghost" id="autoRole" type="button" title="Let the analysis decide the role">Auto role</button>
+        <button class="btn btn-secondary zoom" id="zoomBtn" type="button" aria-pressed="false" title="Scale the plot to the cleavage products; the parent peak runs off the top">Zoom to products</button>
         <button class="btn btn-ghost" id="resetBands" type="button">Reset bands</button>
         <button class="btn btn-ghost" id="removeLane" type="button">Remove lane</button>
       </div>
@@ -134,7 +126,7 @@
       <div class="table-wrap">
         <table class="table results">
           <thead>
-            <tr><th>Lane</th><th>Label</th><th>Role</th><th class="num">Parent</th><th class="num">Cut 1</th><th class="num">Cut 2</th><th class="num">Fraction</th><th class="num">% edit</th><th class="bar-col"></th><th>QC</th></tr>
+            <tr><th>Lane</th><th>Label</th><th class="num">Parent</th><th class="num">Cut 1</th><th class="num">Cut 2</th><th class="num">Fraction</th><th class="num">% edit</th><th class="bar-col"></th><th>QC</th></tr>
           </thead>
           <tbody id="resBody"></tbody>
         </table>
