@@ -4,7 +4,7 @@
 
   const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample;
   const VERSION = '1.0.0';
-  const STORE = 't7e1.params.v1';
+  const STORE = 't7eI.params.v1';
   const $ = id => document.getElementById(id);
 
   const els = {
@@ -886,7 +886,7 @@
         quant ? fixed(r.fc, 4) : '', quant ? fixed(r.editing, 2) : '',
         csvCell(r.flags.join('; '))].join(','));
     });
-    download(new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' }), baseName() + '-t7e1.csv');
+    download(new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' }), baseName() + '-t7eI.csv');
   }
 
   function exportPng() {
@@ -923,7 +923,7 @@
     x.font = `${11 * u}px Barlow, sans-serif`;
     x.fillText('% editing, Guschin formula 100·(1−√(1−f)), ' + p.background + ' baseline' +
 '. ' + state.name, 10 * u, img.h + foot / 2);
-    c.toBlob(b => download(b, baseName() + '-t7e1.png'), 'image/png');
+    c.toBlob(b => download(b, baseName() + '-t7eI.png'), 'image/png');
   }
 
   els.csvBtn.addEventListener('click', exportCsv);

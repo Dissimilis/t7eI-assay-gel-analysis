@@ -104,7 +104,7 @@
         gray[y * W + x] = Math.max(0, Math.min(255, Math.round(v)));
       }
     }
-    return { w: W, h: H, gray, rows: truth, name: 'sample-t7e1-gel.png' };
+    return { w: W, h: H, gray, rows: truth, name: 'sample-t7eI-gel.png' };
   }
 
   return { generate, fractionCleaved };

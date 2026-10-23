@@ -2,7 +2,7 @@
 
 Densitometry for T7 endonuclease I (T7E1) mismatch-cleavage assays. Load a photo of the gel, mark each row of bands, and the app measures the parent band and both cleavage products in every lane and reports % CRISPR editing. It is a single static page in plain HTML, CSS and JavaScript, so images never leave your computer.
 
-**Open the app: <https://dissimilis.github.io/t7eY-assay-gel-analysis/>**
+**Open the app: <https://dissimilis.github.io/t7eI-assay-gel-analysis/>**
 
 ![T7E1 Gel Analysis with the built-in sample gel](docs/screenshot.png)
 
