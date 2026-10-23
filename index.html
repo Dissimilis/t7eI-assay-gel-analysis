@@ -70,13 +70,6 @@
           </div>
         </div>
         <div class="field">
-          <div class="field-head"><label>Formula</label><button type="button" class="info" aria-label="About the formula" aria-describedby="tip-formula"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-formula">Turns the fraction of DNA cut into % of alleles edited. <strong>Diverse indels</strong> (Guschin 2010, NEB protocol) is the standard choice for edited pools with many different indels. <strong>Single allele</strong> is for clones or pools dominated by one edit: it gives somewhat higher values from the same gel and no value once more than half the DNA is cut.</span></div>
-          <div class="seg" data-param="formula">
-            <label class="seg-opt" title="100 × (1 − √(1 − fraction cleaved)), Guschin et al. 2010: a mix of different indels"><input type="radio" name="formula" value="guschin">Diverse indels</label>
-            <label class="seg-opt" title="100 × (1 − √(1 − 2 × fraction cleaved)) / 2: one dominant mutant allele"><input type="radio" name="formula" value="single">Single allele</label>
-          </div>
-        </div>
-        <div class="field">
           <div class="field-head"><label for="laneWidth">Lane width · <span id="laneWidthVal"></span>% of pitch</label><button type="button" class="info" aria-label="About lane width" aria-describedby="tip-laneWidth"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-laneWidth">Width of the strip measured in each lane, as a share of the distance between neighbouring lanes. The default 50% covers the band centre without touching the next lane. Wider takes in band edges and more background; narrower is noisier. It usually moves results by less than one point.</span></div>
           <input type="range" id="laneWidth" min="20" max="90" step="5" class="range">
         </div>
@@ -142,7 +135,7 @@
     <div class="about-grid">
       <div>
         <h5>Formula</h5>
-        <p>% editing = 100 × (1 − √(1 − f)), with f = (b + c) / (a + b + c): <em>a</em> is the uncut parent band, <em>b</em> and <em>c</em> the two T7E1 cleavage products. This is the formula of Guschin et al. (2010, <em>Methods Mol Biol</em> 649:247–256) used in the NEB T7E1 protocol. It assumes random reannealing of a mix of different indels. For one dominant mutant allele the <em>Single allele</em> option uses f = 2p(1 − p) instead.</p>
+        <p>% editing = 100 × (1 − √(1 − f)), with f = (b + c) / (a + b + c): <em>a</em> is the uncut parent band, <em>b</em> and <em>c</em> the two T7E1 cleavage products. This is the formula of Guschin et al. (2010, <em>Methods Mol Biol</em> 649:247–256) used in the NEB T7E1 protocol. It assumes random reannealing of a mix of different indels.</p>
       </div>
       <div>
         <h5>Measurement</h5>

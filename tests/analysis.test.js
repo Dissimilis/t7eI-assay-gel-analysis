@@ -267,3 +267,14 @@ test('One-product mode with a faint parent above is flagged', () => {
   const row = T.analyze(img, [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null })) })], { polarity: 'dark', products: 1 }).rows[0];
   assertNotSilent(row, [60, 60, 60, 60], 'one product');
 });
+
+test('noisy boxes cut a little into the parent tail are flagged (review cases)', () => {
+  // Same gel as the cut tests plus Gaussian pixel noise sigma 2 (Mulberry32 seed 10, Box-Muller).
+  const img = bandGel(fourLanes(25), { w: 500 });
+  let a = 10;
+  const rnd = () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  for (let i = 0; i < img.gray.length; i++) img.gray[i] += 2 * Math.sqrt(-2 * Math.log(rnd() + 1e-12)) * Math.cos(2 * Math.PI * rnd());
+  for (const [y0, y1] of [[18, 126], [19, 140], [18, 132], [20, 114]]) {
+    assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0, y1 }), [25, 25, 25, 25], `noisy box ${y0}-${y1}`);
+  }
+});

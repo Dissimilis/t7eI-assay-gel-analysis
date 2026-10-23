@@ -44,7 +44,6 @@ The pipeline for each row:
 | Bands | detected from the image | dark on light, light on dark |
 | Background | Valley | Valley, Blend, Envelope |
 | Cleavage products | Two | Two, One (when both fragments co-migrate as one band). If a fragment ran off the gel, One gives a lower bound. |
-| Formula | Diverse indels (Guschin) | Single allele: f = 2p(1 − p), so % = 100 × (1 − √(1 − 2f)) / 2, valid for f ≤ 0.5. Cleavage cannot tell p from 1 − p; the formula reports the lower solution. |
 | Lane width | 50% of pitch | 20–90% |
 | Smoothing | σ 1.5 px | 0–4 px |
 
@@ -65,7 +64,6 @@ Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit c
 | P1 / P2 faint | The product peak is less than three times the profile noise. The value depends strongly on the baseline. |
 | no cleavage, no products | No cleavage product in the lane, or none anywhere in the row. |
 | brighter product | Expected above about 37% editing; listed so the band assignment can be checked. |
-| f > 0.5 | The single-allele formula has no solution above a fraction cleaved of 0.5. |
 | product saturated | A cleavage product is clipped too. The value is unreliable in either direction. |
 | extra band | A band that matches neither the parent nor the products appears in most lanes, for example a primer dimer. It is not counted. |
 | check bands | In most lanes of the row a product looks brighter than the parent. That happens above about 37% editing, but more often the box includes the wells or a band above the parents. |
@@ -87,7 +85,7 @@ The engine was also compared with careful hand analysis in ImageJ of a real Invi
 ## Limitations of the assay
 
 - T7E1 underestimates editing compared with sequencing, and it misses most single-base changes ([Vouillot et al. 2015](https://doi.org/10.1534/g3.114.015834); [Sentmanat et al. 2018](https://doi.org/10.1038/s41598-018-19441-8)).
-- The default formula assumes many different indels. A population dominated by one indel gives fewer heteroduplexes: with 50% wild type and 50% of a single mutant allele, f is 0.5 and the default formula reports 29%. Use the *Single allele* formula for clones and near-clonal pools.
+- The formula assumes many different indels. A population dominated by one indel gives fewer heteroduplexes: with 50% wild type and 50% of a single mutant allele, f is 0.5 and the formula reports 29%. Treat results from clones and near-clonal pools as an underestimate.
 - The number is the edited share of PCR product, not of cells.
 - Imager JPEGs are 8-bit and often contrast-stretched, so band intensity is not strictly proportional to DNA mass. A raw 16-bit TIFF is better. The app reads uncompressed, LZW, PackBits and Deflate TIFFs.
 

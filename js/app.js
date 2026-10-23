@@ -36,7 +36,7 @@
 
   function sanitize(p) {
     const d = Object.assign({}, T.DEFAULTS);
-    const choice = { polarity: ['dark', 'light'], background: ['valley', 'blend', 'envelope'], products: [1, 2], formula: ['guschin', 'single'] };
+    const choice = { polarity: ['dark', 'light'], background: ['valley', 'blend', 'envelope'], products: [1, 2] };
     for (const k of Object.keys(d)) {
       if (!(k in p)) continue;
       if (choice[k]) { if (choice[k].includes(p[k])) d[k] = p[k]; }
@@ -48,6 +48,7 @@
     d.faintSNR = clamp(d.faintSNR, 1, 10);
     d.satFraction = clamp(d.satFraction, 0, 0.5);
     d.subtractNC = false;   // no lane roles in this interface, so no NC lanes to subtract
+    d.formula = 'guschin';  // the lab's formula, not a user choice
     return d;
   }
 
@@ -598,7 +599,7 @@
     }));
     const p = state.params;
     els.resHint.textContent = count
-      ? (p.formula === 'single' ? 'Single-allele formula' : 'Guschin formula') + ' · ' + { valley: 'valley', blend: 'blend', envelope: 'envelope' }[p.background] + ' baseline'
+      ? 'Guschin formula · ' + { valley: 'valley', blend: 'blend', envelope: 'envelope' }[p.background] + ' baseline'
       : '';
   }
 
@@ -874,7 +875,7 @@
     const note = t => lines.push(csvCell('# ' + t));
     note('T7E1 Gel Analysis ' + VERSION);
     note('file: ' + state.name + '; exported ' + new Date().toISOString());
-    note('formula: ' + (p.formula === 'single' ? 'single allele 100*(1-sqrt(1-2f))/2' : 'Guschin 2010 100*(1-sqrt(1-f))') + '; f = (cut1+cut2)/(parent+cut1+cut2)');
+    note('formula: Guschin 2010 100*(1-sqrt(1-f)); f = (cut1+cut2)/(parent+cut1+cut2)');
     note('background: ' + p.background + '; lane width: ' + Math.round(p.laneWidth * 100) + '% of pitch; smoothing sigma: ' + p.smoothing + ' px; products: ' + p.products);
     lines.push(['row', 'lane', 'label', 'type', 'x_px', 'parent_area', 'cut1_area', 'cut2_area', 'fraction_cleaved', 'editing_pct', 'flags'].join(','));
     lanesForExport().forEach(e => {
@@ -920,7 +921,7 @@
     const p = state.params;
     x.textAlign = 'left'; x.textBaseline = 'middle'; x.fillStyle = col.text;
     x.font = `${11 * u}px Barlow, sans-serif`;
-    x.fillText('% editing, ' + (p.formula === 'single' ? 'single-allele formula' : 'Guschin formula 100·(1−√(1−f))') + ', ' + p.background + ' baseline' +
+    x.fillText('% editing, Guschin formula 100·(1−√(1−f)), ' + p.background + ' baseline' +
 '. ' + state.name, 10 * u, img.h + foot / 2);
     c.toBlob(b => download(b, baseName() + '-t7e1.png'), 'image/png');
   }
