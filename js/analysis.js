@@ -215,24 +215,42 @@
     const d = new Float32Array(p.length);
     let dmax = 0;
     for (let i = 0; i < p.length; i++) { d[i] = p[i] - base[i]; if (d[i] > dmax) dmax = d[i]; }
-    const thr = Math.max(0.05 * dmax, 5 * noiseSigma(raw), 0.5);
+    const noise = noiseSigma(raw);
+    if (dmax < 5 * noise) {
+      // The opening radius was too small to remove a band that fills most of the box.
+      const mn = Math.min(...p);
+      dmax = 0;
+      for (let i = 0; i < p.length; i++) { d[i] = p[i] - mn; if (d[i] > dmax) dmax = d[i]; }
+    }
+    const thr = Math.max(0.05 * dmax, 5 * noise);
     const cand = [];
     for (let i = 1; i < d.length - 1; i++) if (d[i] > thr && isLocalMax(d, i)) cand.push(i);
     const minSep = pitch ? 0.6 * pitch : 8;
     cand.sort((a, b) => d[b] - d[a]);
-    let kept = [];
-    for (const c of cand) if (kept.every(k => Math.abs(k - c) >= minSep)) kept.push(c);
-    // Centre each lane on the midpoint of its half-maximum width (bands are flat-topped).
-    kept = kept.map(c => {
+    const lanes = [];
+    for (const c of cand) {
+      // A flat-topped band can have several maxima; keep one per half-maximum interval.
+      if (lanes.some(k => (c >= k.l && c <= k.r) || Math.abs(k.c - c) < minSep)) continue;
       const half = d[c] / 2;
       let l = c, rr = c;
       while (l > 0 && d[l - 1] > half) l--;
       while (rr < d.length - 1 && d[rr + 1] > half) rr++;
-      return Math.round((l + rr) / 2);
-    });
-    kept.sort((a, b) => a - b);
-    if (!pitch) pitch = kept.length > 1 ? median(kept.slice(1).map((x, i) => x - kept[i])) : Math.max(8, p.length);
-    return { pitch, xs: kept.map(i => i + r.x0) };
+      lanes.push({ c: Math.round((l + rr) / 2), l, r: rr });
+    }
+    const xs = lanes.map(k => k.c).sort((a, b) => a - b).filter((x, i, a) => i === 0 || x - a[i - 1] >= 4);
+    // The autocorrelation needs several lanes; check it against the spacing of neighbouring lanes.
+    if (xs.length >= 2) {
+      const gaps = xs.slice(1).map((x, i) => x - xs[i]);
+      const gmin = Math.min(...gaps);
+      const adjacent = median(gaps.filter(g => g <= 1.3 * gmin));
+      if (!pitch || pitch < 0.8 * adjacent || pitch > 1.25 * adjacent) pitch = adjacent;
+    } else if (xs.length === 1) {
+      const width = lanes[0].r - lanes[0].l + 1;
+      if (!pitch || pitch < 1.2 * width) pitch = width / 0.6;
+    } else if (!pitch) {
+      pitch = Math.max(8, p.length);
+    }
+    return { pitch, xs: xs.map(i => i + r.x0) };
   }
 
   /** Mean signal of a vertical strip centred on x. */
@@ -279,19 +297,19 @@
   /** Cluster offsets from all lanes of a row; keep the `k` most frequent. */
   function consensusOffsets(lists, k) {
     const all = [];
-    lists.forEach(l => l.forEach(c => all.push(c.off)));
-    all.sort((a, b) => a - b);
+    lists.forEach((l, lane) => l.forEach(c => all.push({ off: c.off, lane })));
+    all.sort((a, b) => a.off - b.off);
     const clusters = [];
-    for (const off of all) {
+    for (const it of all) {
       const c = clusters[clusters.length - 1];
-      if (c && off - c.items[c.items.length - 1] <= 3 + 0.1 * off) c.items.push(off);
-      else clusters.push({ items: [off] });
+      if (c && it.off - c.items[c.items.length - 1] <= 3 + 0.1 * it.off) { c.items.push(it.off); c.lanes.add(it.lane); }
+      else clusters.push({ items: [it.off], lanes: new Set([it.lane]) });
     }
     const lanes = lists.length;
     const minCount = lanes >= 3 ? Math.max(2, Math.ceil(0.25 * lanes)) : 1;
     return clusters
-      .filter(c => c.items.length >= minCount)
-      .sort((a, b) => b.items.length - a.items.length)
+      .filter(c => c.lanes.size >= minCount)
+      .sort((a, b) => b.lanes.size - a.lanes.size)
       .slice(0, k)
       .map(c => median(c.items))
       .sort((a, b) => a - b);
@@ -352,23 +370,60 @@
     const pre = row.lanes.map(lane => {
       const { p, a, b } = laneProfile(sig, img, lane.x, half, r.y0, r.y1);
       const ps = smooth(p, prm.smoothing);
-      const P = argmax(ps, 0, n - 1);
-      const noise = Math.max(0.05, noiseSigma(p));
-      return { lane, p, ps, a, b, P, noise, cands: productCandidates(ps, P, noise) };
+      const noise = Math.max(1e-3, noiseSigma(p));
+      const top = argmax(ps, 0, n - 1);
+      const P = parentIndex(ps, top, n, noise);
+      const q = { lane, p, ps, a, b, P, noise, cands: productCandidates(ps, P, noise) };
+      // A ladder has more strong bands than parent plus two products; keep it out of the vote.
+      q.ladderLike = !lane.role && strongPeaks(ps, P, n).length >= 4;
+      return q;
     });
-    const usable = pre.filter(q => q.lane.role !== 'marker' && q.lane.role !== 'excluded');
-    let offsets = consensusOffsets(usable.map(q => q.cands), prm.products);
-    if (offsets.length < prm.products && usable.length) {
-      // Fall back to the strongest candidates of the most cleaved-looking lane.
-      const best = usable.slice().sort((a, b) => sumProm(b.cands) - sumProm(a.cands))[0];
-      offsets = best.cands.slice().sort((a, b) => b.prom - a.prom).slice(0, prm.products).map(c => c.off).sort((a, b) => a - b);
+    const usable = pre.filter(q => q.lane.role !== 'marker' && q.lane.role !== 'excluded' && !q.ladderLike);
+    let offsets = null;
+    if (usable.length >= 3) {
+      offsets = consensusOffsets(usable.map(q => q.cands), prm.products);
+      if (offsets.length < prm.products) {
+        // Fall back to the strongest candidates of the most cleaved-looking lane.
+        const best = usable.slice().sort((a, b) => sumProm(b.cands) - sumProm(a.cands))[0];
+        offsets = ownOffsets(best, prm.products);
+      }
     }
-
-    const lanes = pre.map(q => analyzeLane(q, offsets, n, r, img, prm));
-    return { region: r, pitch, half, offsets, lanes };
+    // With fewer than three lanes there is no majority to vote: each lane uses its own strongest products.
+    const lanes = pre.map(q => analyzeLane(q, offsets || ownOffsets(q, prm.products), n, r, img, prm));
+    return { region: r, pitch, half, offsets: offsets || [], shared: !!offsets, lanes };
   }
 
   function sumProm(c) { return c.reduce((s, x) => s + x.prom, 0); }
+
+  /**
+   * The parent is the uppermost strong band: above about 37% editing the
+   * larger cleavage product is brighter than the uncut band.
+   */
+  function parentIndex(ps, top, n, noise) {
+    const reach = Math.max(10, Math.round(n / 4));
+    const ref = prominence(ps, top, reach);
+    for (let j = 1; j < top - 4; j++) {
+      if (!isLocalMax(ps, j)) continue;
+      const pr = prominence(ps, j, reach);
+      if (pr >= 0.2 * ref && pr >= 4 * noise) return j;
+    }
+    return top;
+  }
+
+  function ownOffsets(q, k) {
+    return q.cands.slice().sort((a, b) => b.prom - a.prom).slice(0, k).map(c => c.off).sort((a, b) => a - b);
+  }
+
+  /** Local maxima (including the parent) with at least a quarter of the parent's height. */
+  function strongPeaks(ps, P, n) {
+    const parentProm = ps[P] - Math.min(...ps);
+    const out = [P];
+    for (let j = 1; j < n - 1; j++) {
+      if (Math.abs(j - P) <= 4 || !isLocalMax(ps, j)) continue;
+      if (prominence(ps, j, Math.max(10, Math.round(n / 4))) >= 0.25 * parentProm) out.push(j);
+    }
+    return out;
+  }
 
   function analyzeLane(q, offsets, n, r, img, prm) {
     const { ps, P, noise } = q;
@@ -387,7 +442,8 @@
     // Valleys bracketing each band.
     const peaks = [P].concat(prods.map(x => x.y));
     let valleys;
-    if (q.lane.valleys && q.lane.valleys.length === peaks.length + 1) {
+    const manual = !!(q.lane.valleys && q.lane.valleys.length === peaks.length + 1);
+    if (manual) {
       valleys = q.lane.valleys.map(v => Math.min(n - 1, Math.max(0, Math.round(v - r.y0)))).sort((a, b) => a - b);
       flags.push('manual band boundaries');
     } else {
@@ -409,20 +465,35 @@
       areas.push(sum);
     }
     prods.forEach((x, k) => {
-      if (!x.found && !q.lane.valleys) { areas[k + 1] = 0; flags.push('product ' + (k + 1) + ' not detected'); }
+      if (!x.found && !manual) { areas[k + 1] = 0; flags.push('product ' + (k + 1) + ' not detected'); }
     });
 
     const heights = peaks.map((y, i) => ps[y] - (isNaN(baseline[y]) ? nodes[Math.min(i, nodes.length - 1)] : baseline[y]));
-    prods.forEach((x, k) => { if (x.found && heights[k + 1] < prm.faintSNR * noise) flags.push('product ' + (k + 1) + ' faint'); });
-    if (!offsets.length) flags.push('no cleavage products found in row');
+    const faint = prods.map((x, k) => x.found && heights[k + 1] < prm.faintSNR * noise);
+    if (prods.length === 2 && !manual && prods[0].found !== prods[1].found && faint[0] !== faint[1]) {
+      // A single faint "product" without its partner is noise, as in an uncut control.
+      const k = faint[0] ? 0 : 1;
+      prods[k].found = false; faint[k] = false; areas[k + 1] = 0;
+      flags.push('product ' + (k + 1) + ' not detected');
+    }
+    prods.forEach((x, k) => { if (faint[k]) flags.push('product ' + (k + 1) + ' faint'); });
+    if (!offsets.length) flags.push('no cleavage products found');
+    // Cleavage always yields both fragments: one without the other points to a non-specific band.
+    if (prods.length === 2 && prods[0].found !== prods[1].found && !manual) flags.push('only one cleavage product found');
+    if (P !== argmax(ps, 0, n - 1)) flags.push('cleavage product brighter than parent');
+    if (prm.products === 1 && offsets.length === 1 &&
+        q.cands.some(c => c.off > offsets[0] + 3 + 0.15 * offsets[0] && c.prom >= 0.1 * parentProm)) {
+      flags.push('second product visible: set two products');
+    }
 
     const sat = clippedShare(img, prm.polarity, q.a, q.b, r.y0 + P);
     if (sat > prm.satFraction) flags.push('parent saturated');
-    if (parentProm < Math.max(8 * noise, 10)) flags.push('weak lane');
+    if (ps[argmax(ps, 0, n - 1)] - Math.min(...ps) < Math.max(8 * noise, 10)) flags.push('weak lane');
 
     // Automatic role: a ladder has strong bands that match neither the parent nor the products.
     if (P <= 1 || P >= n - 2) flags.push('band touches region edge');
     let role = q.lane.role;
+    if (!role && q.ladderLike) role = 'marker';
     if (!role) {
       role = 'sample';
       const matches = j => Math.abs(j - P) <= 4 || offsets.some(off => Math.abs(j - P - off) <= 3 + 0.15 * off);

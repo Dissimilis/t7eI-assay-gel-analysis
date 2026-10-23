@@ -116,3 +116,71 @@ test('real gel: agreement with hand ImageJ values', { skip: !pgm || !fs.existsSy
     assert.equal(r.lanes[0].role, 'marker');
   });
 });
+
+// Synthetic lanes on a flat background: [x, % editing], Gaussian bands at y 30/60/95.
+function laneGel(lanes, opts) {
+  const o = Object.assign({ w: 500, h: 140, ladder: null, width: 17 }, opts);
+  const g = new Float32Array(o.w * o.h).fill(200);
+  const draw = (xc, bands) => {
+    for (let x = xc - o.width; x <= xc + o.width; x++) for (let y = 0; y < o.h; y++) {
+      let v = 0;
+      bands.forEach(([yc, m]) => { v += 80 * m * Math.exp(-((y - yc) ** 2) / 32); });
+      g[y * o.w + x] -= v;
+    }
+  };
+  lanes.forEach(([xc, ed]) => {
+    const p = ed / 100, fc = 1 - (1 - p) ** 2;
+    draw(xc, [[30, 1 - fc], [60, fc * 2 / 3], [95, fc / 3]]);
+  });
+  if (o.ladder) draw(o.ladder, [[20, 1], [45, 0.8], [75, 0.6], [110, 0.5]]);
+  return T.makeImage(g, o.w, o.h);
+}
+
+function analyseBox(img, box) {
+  const sig = T.signalImage(img, 'dark');
+  const d = T.detectLanes(sig, img, box);
+  return T.analyze(img, [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null })) })], { polarity: 'dark' }).rows[0];
+}
+
+test('high editing: a product brighter than the parent does not become the parent', () => {
+  const lanes = [[60, 50], [160, 60], [260, 20], [360, 0]];
+  const row = analyseBox(laneGel(lanes), { x0: 0, x1: 500, y0: 5, y1: 135 });
+  lanes.forEach(([, ed], i) => {
+    assert.equal(row.lanes[i].role, 'sample');
+    assert.ok(Math.abs(row.lanes[i].editing - ed) < 1, `lane ${i}: ${row.lanes[i].editing} vs ${ed}`);
+  });
+});
+
+test('two-lane row: the ladder does not set the product positions', () => {
+  const img = laneGel([[200, 22]], { ladder: 100 });
+  const row = analyseBox(img, { x0: 50, x1: 250, y0: 5, y1: 135 });
+  assert.equal(row.lanes.length, 2);
+  assert.equal(row.lanes[0].role, 'marker');
+  assert.ok(Math.abs(row.lanes[1].editing - 22) < 1, String(row.lanes[1].editing));
+});
+
+test('a single lane that fills a tight box is still found, once', () => {
+  const img = laneGel([[100, 25]], { w: 200, width: 40 });
+  const row = analyseBox(img, { x0: 0, x1: 200, y0: 5, y1: 135 });
+  assert.equal(row.lanes.length, 1);
+  assert.ok(Math.abs(row.lanes[0].editing - 25) < 1.5, String(row.lanes[0].editing));
+});
+
+test('a band shared by every lane at a wrong position is flagged, not silently counted', () => {
+  const W = 900, H = 140, g = new Float32Array(W * H).fill(200);
+  for (let i = 0; i < 8; i++) {
+    const xc = 60 + i * 110, fc = i === 3 ? 0.4 : 0;
+    const bands = [[30, 1 - fc], [60, fc * 2 / 3], [95, fc / 3], [78, 0.25]];
+    for (let x = xc - 17; x <= xc + 17; x++) for (let y = 0; y < H; y++) {
+      let v = 0;
+      bands.forEach(([yc, m]) => { v += 80 * m * Math.exp(-((y - yc) ** 2) / 32); });
+      g[y * W + x] -= v;
+    }
+  }
+  const row = analyseBox(T.makeImage(g, W, H), { x0: 0, x1: W, y0: 5, y1: 135 });
+  row.lanes.forEach((l, i) => {
+    if (i === 3) return;
+    const silent = l.editing > 2 && !l.flags.some(f => /only one|not detected/.test(f));
+    assert.ok(!silent, `lane ${i}: ${l.editing.toFixed(1)} with flags ${l.flags.join('; ')}`);
+  });
+});

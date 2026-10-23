@@ -14,11 +14,11 @@
   <header class="nav top">
     <div class="nav-brand brand">T7E1 Gel Analysis<span class="brand-sub">CRISPR editing densitometry</span></div>
     <span class="tag tag-neutral file-tag" id="fileName">no image</span>
-    <label class="btn btn-secondary" title="Load a gel image (PNG, JPEG, TIFF)">
+    <button class="btn btn-secondary" id="loadBtn" type="button" title="Load a gel image (PNG, JPEG, TIFF)">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
       Load image
-      <input type="file" id="fileInput" accept="image/*,.tif,.tiff" hidden>
-    </label>
+    </button>
+    <input type="file" id="fileInput" accept="image/*,.tif,.tiff" hidden>
     <button class="btn btn-secondary" id="sampleBtn" type="button">Sample gel</button>
     <button class="btn btn-secondary" id="pngBtn" type="button" title="Annotated figure with % editing under each lane">Figure PNG</button>
     <button class="btn btn-primary blueprint" id="csvBtn" type="button">
@@ -33,11 +33,11 @@
       <div class="sec-head">
         <span class="sec-num">01</span>
         <h3>Image</h3>
-        <span class="sec-hint">Drag a box over each row of bands · drag a lane to move it · double-click to add a lane</span>
+        <span class="sec-hint" title="Keys: ← → move the selected lane, [ ] previous or next lane, Delete removes it">Drag a box over each row of bands · drag lanes to move · double-click adds a lane</span>
       </div>
       <div class="blueprint frame" id="dropZone">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-        <div class="stage">
+        <div class="stage is-empty">
           <canvas id="imgCanvas" class="img-canvas"></canvas>
           <canvas id="ovCanvas" class="ov-canvas" tabindex="0" aria-label="Gel image. Drag to mark a row of bands."></canvas>
           <div class="empty" id="emptyMsg">Drop a gel image here, or load the sample gel.</div>
@@ -101,7 +101,7 @@
       <div class="chips" id="laneChips"></div>
       <div class="blueprint frame prof-frame">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
-        <canvas id="profCanvas" class="prof-canvas" aria-label="Lane profile"></canvas>
+        <canvas id="profCanvas" class="prof-canvas" tabindex="0" role="img" aria-label="Profile of the selected lane with band areas and boundaries"></canvas>
         <div class="prof-legend">
           <span>Signal vs. distance from region top (px) · drag the markers to move band boundaries</span>
           <span><span class="lg-base">— — baseline</span> shaded = band area</span>

@@ -32,10 +32,10 @@ The pipeline for each row:
 
 - **Lanes.** The lane pitch comes from the autocorrelation of the row's column profile. Lane centres are the half-maximum midpoints of the peaks above a rolling-ball background. Empty wells produce no peak and are skipped.
 - **Profiles.** Each lane is a vertical strip, half the lane pitch wide by default. Its mean signal per pixel row is smoothed with a Gaussian (σ 1.5 px).
-- **Bands.** The parent band is the strongest peak. The cleavage products are located at offsets shared by the lanes of the row, measured from each lane's own parent band. Tilted rows and slight smiling therefore work, and a faint product is still found where its brighter neighbours put it.
+- **Bands.** The parent band is the uppermost strong peak; above about 37% editing the larger cleavage product is brighter than the parent, so the strongest peak is not always the parent. In rows with three or more sample lanes, the cleavage products are located at offsets shared by the lanes of the row, measured from each lane's own parent band. Tilted rows and slight smiling therefore work, and a faint product is still found where its brighter neighbours put it. In smaller rows each lane uses its own two strongest products.
 - **Background.** By default a straight line joins the valleys on either side of each band (*Valley*), which is how ImageJ Gel Analyzer is used by hand. *Envelope* draws one line under the whole lane. *Blend* starts from the valley line and moves it towards the envelope where smear lifts the valleys between bands.
 - **Areas.** Each band's area is the profile summed above the baseline between its two boundaries. You can drag the boundary markers on the profile plot; the lane is then marked *edited*.
-- **Ladders.** A lane with strong bands that match neither the parent nor the product positions is marked as a marker and left out.
+- **Ladders.** A lane with four or more strong bands, or with strong bands that match neither the parent nor the product positions, is marked as a marker. Markers take no part in finding the product positions and are not quantified.
 
 ### Parameters
 
@@ -43,24 +43,35 @@ The pipeline for each row:
 |---|---|---|
 | Bands | detected from the image | dark on light, light on dark |
 | Background | Valley | Valley, Blend, Envelope |
-| Cleavage products | Two | Two, One (when one fragment runs off the gel or co-migrates) |
-| Formula | Diverse indels (Guschin) | Single allele: f = 2p(1 − p), so % = 100 × (1 − √(1 − 2f)) / 2, valid for f ≤ 0.5 |
+| Cleavage products | Two | Two, One (when both fragments co-migrate as one band). If a fragment ran off the gel, One gives a lower bound. |
+| Formula | Diverse indels (Guschin) | Single allele: f = 2p(1 − p), so % = 100 × (1 − √(1 − 2f)) / 2, valid for f ≤ 0.5. Cleavage cannot tell p from 1 − p; the formula reports the lower solution. |
 | Lane width | 50% of pitch | 20–90% |
 | Smoothing | σ 1.5 px | 0–4 px |
-| Subtract NC background | off | subtracts the mean fraction cleaved of the NC lanes before the formula |
+| Subtract NC background | off | subtracts the mean fraction cleaved of all NC lanes (every row pooled) from each sample lane before the formula; NC lanes themselves are reported uncorrected |
 
-Settings are remembered in the browser. **Reset defaults** restores them.
+Settings are remembered in the browser. **Reset defaults** restores them. Changing the number of cleavage products resets hand-moved band boundaries.
+
+Keyboard: with a lane selected, ← and → move it (Shift for 5 px), [ and ] select the previous or next lane, and Delete removes it. **Load image** and every control are reachable with Tab; drawing a row and moving band boundaries need a pointer.
+
+Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit camera data are scaled by that range, so the saturation check still works. Floating-point TIFFs are read, but clipping cannot be checked in them.
 
 ### Quality flags
 
 | Flag | Meaning |
 |---|---|
 | saturated | More than 2% of the parent band core is clipped. The parent area is too small, so % editing reads high and is an upper bound. Take a shorter exposure or use the raw TIFF. |
+| one product | Only one of the two cleavage products was found. Cleavage always gives both fragments, so the band found may be non-specific (a primer dimer, a second PCR product) and the value should not be trusted. |
+| second product? | *One* product is selected but a second band is visible below it. Switch to *Two*. |
 | P1 / P2 missing | No peak was found at the product position. The area counts as zero. Expected in uncut controls. |
 | P1 / P2 faint | The product peak is less than three times the profile noise. The value depends strongly on the baseline. |
-| weak | The parent band is barely above background. |
+| no cleavage, no products | No cleavage product in the lane, or none anywhere in the row. |
+| brighter product | Expected above about 37% editing; listed so the band assignment can be checked. |
+| f > 0.5 | The single-allele formula has no solution above a fraction cleaved of 0.5. |
+| weak | The lane's strongest band is barely above background. |
 | edge | The parent band touches the box edge. Draw the box a little larger. |
-| edited | Band boundaries were moved by hand. |
+| edited | Band boundaries were moved by hand (`manual band boundaries` in the CSV). |
+
+The CSV export prefixes labels that start with `=`, `+`, `-` or `@` with an apostrophe, so spreadsheets do not run them as formulas.
 
 ## Validation
 

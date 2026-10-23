@@ -13,6 +13,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  const MAX_PIXELS = 40e6;
   const TYPE_SIZE = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8 };
 
   function isTiff(buf) {
@@ -72,6 +73,7 @@
       prev = code;
       if (next >= (1 << width) - 1 && width < 12) width++;
     }
+    if (op < expected) throw new Error('truncated LZW data');
     return out;
   }
 
@@ -83,20 +85,31 @@
       if (n >= 0) { for (let k = 0; k <= n && o < expected; k++) out[o++] = input[i++]; }
       else if (n !== -128) { const v = input[i++]; for (let k = 0; k < 1 - n && o < expected; k++) out[o++] = v; }
     }
+    if (o < expected || i > input.length) throw new Error('truncated PackBits data');
     return out;
   }
 
-  async function inflate(input) {
+  async function inflate(input, expected) {
     if (typeof DecompressionStream === 'undefined') throw new Error('Deflate-compressed TIFF needs a browser with DecompressionStream');
-    const stream = new Blob([input]).stream().pipeThrough(new DecompressionStream('deflate'));
-    return new Uint8Array(await new Response(stream).arrayBuffer());
+    const reader = new Blob([input]).stream().pipeThrough(new DecompressionStream('deflate')).getReader();
+    const out = new Uint8Array(expected);
+    let n = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (n + value.length > expected) { out.set(value.subarray(0, expected - n), n); n = expected; await reader.cancel(); break; }
+      out.set(value, n);
+      n += value.length;
+    }
+    if (n < expected) throw new Error('truncated Deflate data');
+    return out;
   }
 
   async function decompress(bytes, compression, expected) {
-    if (compression === 1) return bytes;
+    if (compression === 1) { if (bytes.length < expected) throw new Error('truncated image data'); return bytes.slice(0, expected); }
     if (compression === 5) return lzw(bytes, expected);
     if (compression === 32773) return packBits(bytes, expected);
-    if (compression === 8 || compression === 32946) return inflate(bytes);
+    if (compression === 8 || compression === 32946) return inflate(bytes, expected);
     throw new Error('Unsupported TIFF compression ' + compression + ' (use uncompressed, LZW, PackBits or Deflate)');
   }
 
@@ -115,24 +128,47 @@
 
   async function decode(buf) {
     if (!isTiff(buf)) throw new Error('Not a TIFF file');
+    try {
+      return await decodeTiff(buf);
+    } catch (err) {
+      if (err instanceof RangeError) throw new Error('the TIFF file is truncated or damaged');
+      throw err;
+    }
+  }
+
+  async function decodeTiff(buf) {
     const dv = new DataView(buf);
     const le = dv.getUint8(0) === 0x49;
     const t = readIfd(dv, le);
-    const w = t[256][0], h = t[257][0];
-    const spp = (t[277] || [1])[0], bps = (t[258] || [1])[0];
-    const compression = (t[259] || [1])[0], photometric = (t[262] || [1])[0];
-    const predictor = (t[317] || [1])[0], format = (t[339] || [1])[0], planar = (t[284] || [1])[0];
-    if (planar !== 1 && spp > 1) throw new Error('Planar TIFF is not supported');
-    if (![8, 16, 32].includes(bps)) throw new Error('Unsupported TIFF bit depth ' + bps);
-    if (bps === 32 && format !== 3) throw new Error('32-bit integer TIFF is not supported');
+    const one = (tag, def) => (t[tag] && t[tag].length ? t[tag][0] : def);
+    const w = one(256), h = one(257);
+    if (!(w > 0 && h > 0)) throw new Error('the TIFF file has no image size');
+    if (w * h > MAX_PIXELS) throw new Error('the image is ' + Math.round(w * h / 1e6) + ' megapixels; the limit is ' + MAX_PIXELS / 1e6 + ' MP. Crop it first.');
+    const spp = one(277, 1), bps = one(258, 1);
+    const compression = one(259, 1), photometric = one(262, 1);
+    const predictor = one(317, 1), format = one(339, 1), planar = one(284, 1);
+    if ((t[258] || []).some(b => b !== bps)) throw new Error('TIFF channels with different bit depths are not supported');
+    if (planar !== 1 && spp > 1) throw new Error('planar TIFF is not supported');
+    if (photometric === 3) throw new Error('palette (indexed colour) TIFF is not supported: save the gel as grayscale');
+    if (![0, 1, 2].includes(photometric)) throw new Error('TIFF colour model ' + photometric + ' is not supported');
+    if (photometric === 2 && spp < 3) throw new Error('RGB TIFF with ' + spp + ' channels is not supported');
+    if (![8, 16, 32].includes(bps)) throw new Error('TIFF bit depth ' + bps + ' is not supported');
+    if (bps === 32 ? format !== 3 : format !== 1) throw new Error('signed or integer 32-bit TIFF samples are not supported');
+    if (predictor !== 1 && !(predictor === 2 && bps !== 32)) throw new Error('TIFF predictor ' + predictor + ' is not supported');
+    const tiled = !!t[324];
+    if (tiled ? !(t[322] && t[323] && t[325]) : !(t[273] && t[279])) throw new Error('the TIFF file lacks its image data tags');
+    const offsets = tiled ? t[324] : t[273], counts = tiled ? t[325] : t[279];
+    for (let i = 0; i < offsets.length; i++) {
+      if (counts[i] === undefined || offsets[i] + counts[i] > buf.byteLength) throw new Error('the TIFF file is truncated or damaged');
+    }
     const bpp = (bps / 8) * spp, rowBytes = w * bpp;
     const raw = new Uint8Array(rowBytes * h);
 
-    if (t[324]) {
-      const tw = t[322][0], th = t[323][0], across = Math.ceil(w / tw);
-      for (let i = 0; i < t[324].length; i++) {
-        const src = new Uint8Array(buf, t[324][i], t[325][i]);
-        const tile = await decompress(src, compression, tw * th * bpp);
+    if (tiled) {
+      const tw = t[322][0], th = t[323][0], across = Math.ceil(w / tw), need = across * Math.ceil(h / th);
+      if (offsets.length < need) throw new Error('the TIFF file is missing image tiles');
+      for (let i = 0; i < need; i++) {
+        const tile = await decompress(new Uint8Array(buf, offsets[i], counts[i]), compression, tw * th * bpp);
         if (predictor === 2) unpredict(tile, tw * bpp, th, bps, spp, le);
         const tx = (i % across) * tw, ty = Math.floor(i / across) * th;
         for (let y = 0; y < th && ty + y < h; y++) {
@@ -141,11 +177,11 @@
         }
       }
     } else {
-      const rps = (t[278] || [h])[0];
-      for (let i = 0; i < t[273].length; i++) {
+      const rps = Math.min(one(278, h), h), need = Math.ceil(h / rps);
+      if (offsets.length < need) throw new Error('the TIFF file is missing image strips');
+      for (let i = 0; i < need; i++) {
         const rows = Math.min(rps, h - i * rps);
-        const src = new Uint8Array(buf, t[273][i], t[279][i]);
-        const strip = await decompress(src, compression, rows * rowBytes);
+        const strip = await decompress(new Uint8Array(buf, offsets[i], counts[i]), compression, rows * rowBytes);
         if (predictor === 2) unpredict(strip, rowBytes, rows, bps, spp, le);
         raw.set(strip.subarray(0, rows * rowBytes), i * rps * rowBytes);
       }
@@ -153,14 +189,21 @@
 
     const rdv = new DataView(raw.buffer);
     const sample = bps === 8 ? i => raw[i] : bps === 16 ? i => rdv.getUint16(2 * i, le) : i => rdv.getFloat32(4 * i, le);
-    const gray = new Float32Array(w * h);
-    let lo = 0, hi = bps === 8 ? 255 : 65535;
-    if (bps === 32) {
+    const total = w * h * spp;
+    let lo = 0, hi = 255, bits = bps;
+    if (bps === 16) {
+      // Cameras often store 12- or 14-bit data in 16-bit files: scale by the range actually used.
+      let max = 0;
+      for (let i = 0; i < total; i++) { const v = sample(i); if (v > max) max = v; }
+      bits = [10, 12, 14, 16].find(b => max <= 2 ** b - 1);
+      hi = 2 ** bits - 1;
+    } else if (bps === 32) {
       lo = Infinity; hi = -Infinity;
-      for (let i = 0; i < w * h * spp; i++) { const v = sample(i); if (v < lo) lo = v; if (v > hi) hi = v; }
-      if (hi === lo) hi = lo + 1;
+      for (let i = 0; i < total; i++) { const v = sample(i); if (v < lo) lo = v; if (v > hi) hi = v; }
+      if (!(hi > lo)) hi = lo + 1;
     }
     const scale = 255 / (hi - lo);
+    const gray = new Float32Array(w * h);
     for (let p = 0; p < w * h; p++) {
       let v;
       if (spp >= 3) v = 0.299 * sample(p * spp) + 0.587 * sample(p * spp + 1) + 0.114 * sample(p * spp + 2);
@@ -168,8 +211,12 @@
       v = (v - lo) * scale;
       gray[p] = photometric === 0 ? 255 - v : v;
     }
-    const step = 255 / (hi - lo);   // one raw unit on the 0-255 scale
-    return { w, h, gray, bits: bps, clipLow: bps === 8 ? 3 : 0.5 * step, clipHigh: bps === 8 ? 252 : 255 - 0.5 * step };
+    if (bps === 32) {
+      // Float data has no fixed full scale, so clipping cannot be detected.
+      return { w, h, gray, bits, clipLow: -Infinity, clipHigh: Infinity, saturationUnknown: true };
+    }
+    const step = scale;   // one raw unit on the 0-255 scale
+    return { w, h, gray, bits, clipLow: bps === 8 ? 3 : 0.5 * step, clipHigh: bps === 8 ? 252 : 255 - 0.5 * step };
   }
 
   return { isTiff, decode, lzw, packBits };

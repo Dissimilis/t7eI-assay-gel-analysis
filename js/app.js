@@ -8,7 +8,7 @@
   const $ = id => document.getElementById(id);
 
   const els = {
-    fileName: $('fileName'), fileInput: $('fileInput'), sampleBtn: $('sampleBtn'),
+    fileName: $('fileName'), fileInput: $('fileInput'), loadBtn: $('loadBtn'), sampleBtn: $('sampleBtn'),
     csvBtn: $('csvBtn'), pngBtn: $('pngBtn'),
     stage: document.querySelector('.stage'), img: $('imgCanvas'), ov: $('ovCanvas'), empty: $('emptyMsg'),
     rowsBar: $('rowsBar'), meta: $('imgMeta'),
@@ -44,6 +44,9 @@
     }
     d.laneWidth = clamp(d.laneWidth, 0.2, 0.9);
     d.smoothing = clamp(d.smoothing, 0, 4);
+    d.blendK = clamp(d.blendK, 0.02, 1);
+    d.faintSNR = clamp(d.faintSNR, 1, 10);
+    d.satFraction = clamp(d.satFraction, 0, 0.5);
     return d;
   }
 
@@ -64,8 +67,9 @@
       bg: cssVar('--color-bg', '#f2f2f3'), warn: cssVar('--color-warn', '#a8552e')
     };
   }
-  const WARN = ['parent saturated', 'weak lane', 'band touches region edge', 'no cleavage products found in row'];
-  function isWarn(f) { return WARN.includes(f) || /invalid/.test(f); }
+  const WARN = ['parent saturated', 'weak lane', 'band touches region edge', 'only one cleavage product found'];
+  function isWarn(f) { return WARN.includes(f) || /invalid|second product visible/.test(f); }
+  const MAX_PIXELS = 40e6;
 
   function signal() {
     if (!state.sig || state.sigPolarity !== state.params.polarity) {
@@ -124,16 +128,22 @@
 
   // ------------------------------------------------------------ image loading
 
+  let loadToken = 0;
+
   async function loadFile(file) {
     if (!file) return;
+    const token = ++loadToken;   // a later load or the sample button wins over a slow decode
+    setMessage('Reading ' + file.name + '…');
     try {
       const buf = await file.arrayBuffer();
       let img;
       if (TIFF.isTiff(buf)) {
         const t = await TIFF.decode(buf);
         img = T.makeImage(t.gray, t.w, t.h, t);
+        img.saturationUnknown = !!t.saturationUnknown;
       } else {
-        const bmp = await createImageBitmap(new Blob([buf], { type: file.type || 'image/png' }), { colorSpaceConversion: 'none', premultiplyAlpha: 'none' });
+        const bmp = await createImageBitmap(new Blob([buf], { type: file.type || 'image/png' }), { colorSpaceConversion: 'none', premultiplyAlpha: 'none', imageOrientation: 'from-image' });
+        if (bmp.width * bmp.height > MAX_PIXELS) throw new Error('the image is ' + Math.round(bmp.width * bmp.height / 1e6) + ' megapixels; the limit is ' + MAX_PIXELS / 1e6 + ' MP. Crop it first.');
         const c = document.createElement('canvas');
         c.width = bmp.width; c.height = bmp.height;
         const x = c.getContext('2d', { willReadFrequently: true });
@@ -142,14 +152,18 @@
         img = T.makeImage(T.rgbaToGray(d, c.width, c.height), c.width, c.height);
         if (/jpe?g$/i.test(file.name) || file.type === 'image/jpeg') img.lossy = true;
       }
+      if (token !== loadToken) return;
       setImage(img, file.name, []);
       setMessage(state.rows.length ? '' : 'Drag a box over the bands of one row: parent band and both cleavage products. Repeat for each row.');
     } catch (err) {
-      setMessage('Could not read ' + file.name + ': ' + err.message);
+      if (token !== loadToken) return;
+      const why = err && err.name === 'InvalidStateError' ? 'the browser cannot decode this image format' : (err && err.message) || String(err);
+      setMessage('Could not read ' + file.name + ': ' + why);
     }
   }
 
   function loadSample() {
+    loadToken++;
     const s = SAMPLE.generate(7);
     setImage(T.makeImage(s.gray, s.w, s.h), s.name, s.rows);
     setMessage('Synthetic gel with known values. Row 1 lane 10 is overloaded on purpose (saturated parent), row 2 lane 7 is underloaded.');
@@ -192,6 +206,7 @@
     }
     ctx.putImageData(id, 0, 0);
     els.empty.hidden = true;
+    els.stage.classList.remove('is-empty');
   }
 
   // ------------------------------------------------------------ rows and lanes
@@ -221,12 +236,22 @@
     return row;
   }
 
-  function redetect(ri) {
-    const row = state.rows[ri];
+  /** Find the lanes of a row again; a new lane close to an old one keeps its role and label. */
+  function redetectRow(row, keepBoundaries) {
     const d = T.detectLanes(signal(), state.img, row);
+    const old = row.lanes;
     row.pitch = d.pitch;
-    row.lanes = d.xs.map(newLane);
-    if (row.lanes.length) select(ri, 0);
+    row.lanes = d.xs.map(x => {
+      const lane = newLane(x);
+      const near = old.filter(l => Math.abs(l.x - x) < d.pitch / 2).sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0];
+      if (near) { lane.role = near.role; lane.label = near.label; if (keepBoundaries) lane.valleys = near.valleys; }
+      return lane;
+    });
+  }
+
+  function redetect(ri) {
+    redetectRow(state.rows[ri], false);
+    if (state.rows[ri].lanes.length) select(ri, 0);
     recompute();
   }
 
@@ -291,7 +316,8 @@
     const img = state.img;
     const parts = [];
     if (img) {
-      parts.push(img.w + ' × ' + img.h + ' px, ' + img.bits + '-bit' + (img.lossy ? ' JPEG (lossy: prefer a raw TIFF for quantification)' : ''));
+      parts.push(img.w + ' × ' + img.h + ' px, ' + img.bits + '-bit' + (img.lossy ? ' JPEG (lossy: prefer a raw TIFF for quantification)' : '') +
+        (img.saturationUnknown ? ' (floating point: saturation cannot be checked)' : ''));
       if (state.result && state.result.ncCount) parts.push('NC mean fraction cleaved ' + state.result.ncFc.toFixed(3) + (state.params.subtractNC ? ' (subtracted)' : ''));
     }
     els.meta.textContent = parts.join(' · ');
@@ -366,7 +392,7 @@
       chip.className = 'row-chip';
       const t = document.createElement('span');
       t.textContent = 'Row ' + (ri + 1) + ' · ' + row.lanes.length + ' lanes';
-      const re = button('Detect lanes', () => redetect(ri), 'Find the lanes in this row again (drops manual lane edits)');
+      const re = button('Detect lanes', () => redetect(ri), 'Find the lanes in this row again. Moved or added lanes and band boundaries are reset; roles and labels are kept.');
       const rm = button('Remove', () => removeRow(ri), 'Remove this row');
       chip.append(t, re, rm);
       els.rowsBar.appendChild(chip);
@@ -576,7 +602,9 @@
   }
 
   function shortFlag(f) {
-    return ({ 'parent saturated': 'saturated', 'weak lane': 'weak', 'band touches region edge': 'edge', 'no cleavage products found in row': 'no products', 'manual band boundaries': 'edited' })[f] ||
+    return ({ 'parent saturated': 'saturated', 'weak lane': 'weak', 'band touches region edge': 'edge', 'no cleavage products found': 'no products',
+      'manual band boundaries': 'edited', 'only one cleavage product found': 'one product', 'second product visible: set two products': 'second product?',
+      'cleavage product brighter than parent': 'brighter product' })[f] ||
       f.replace('product ', 'P').replace(' not detected', ' missing').replace(/fraction cleaved > 0.5.*/, 'f > 0.5');
   }
 
@@ -648,6 +676,9 @@
     if (d.kind === 'region' && d.moved && Math.abs(d.x1 - d.x0) > 15 && Math.abs(d.y1 - d.y0) > 10) {
       addRow(d);
       recompute();
+    } else if (d.kind === 'region' && !d.moved) {
+      state.sel = null;   // a click on empty gel clears the selection, so Delete cannot hit a stale lane
+      render();
     } else {
       renderOverlay();
     }
@@ -668,14 +699,17 @@
   });
 
   document.addEventListener('keydown', e => {
-    if (e.target.closest && e.target.closest('input, select, textarea')) return;
+    // Lane shortcuts apply only when the gel, the profile or a results row has focus (or nothing does).
+    const t = e.target;
+    const scope = t === document.body || t === els.ov || t === els.prof || (t.closest && t.closest('#resBody tr') === t);
+    if (!scope) return;
     const s = selIndex();
     if (!s) return;
     if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeSelectedLane(); }
     else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
       e.preventDefault();
-      const lane = laneAt(s.ri, s.li);
-      lane.x += (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 5 : 1);
+      const lane = laneAt(s.ri, s.li), row = state.rows[s.ri];
+      lane.x = clamp(lane.x + (e.key === 'ArrowLeft' ? -1 : 1) * (e.shiftKey ? 5 : 1), row.x0, row.x1);
       recompute();
     } else if (e.key === '[' || e.key === ']') {
       const flat = [];
@@ -698,9 +732,8 @@
     if (best < 0) return;
     e.preventDefault();
     els.prof.setPointerCapture(e.pointerId);
-    const lane = laneAt(s.ri, s.li);
-    lane.valleys = r.valleys.map(v => v + r.y0);
-    state.drag = { kind: 'valley', k: best, ri: s.ri, li: s.li };
+    // The boundaries become manual only once a handle actually moves.
+    state.drag = { kind: 'valley', k: best, ri: s.ri, li: s.li, start: r.valleys.map(v => v + r.y0) };
     recompute();
   });
 
@@ -715,7 +748,7 @@
       els.prof.style.cursor = near ? 'ew-resize' : 'default';
       return;
     }
-    const lane = laneAt(d.ri, d.li), v = lane.valleys.map(y => y - r.y0);
+    const lane = laneAt(d.ri, d.li), v = (lane.valleys || d.start).map(y => y - r.y0);
     const lo = d.k === 0 ? 0 : v[d.k - 1] + 1, hi = d.k === v.length - 1 ? S.n - 1 : v[d.k + 1] - 1;
     v[d.k] = clamp(S.I(mx), lo, hi);
     lane.valleys = v.map(i => i + r.y0);
@@ -734,7 +767,9 @@
       const v = e.target.value;
       state.params[key] = key === 'products' ? Number(v) : v;
       saveParams();
-      if (key === 'polarity' && state.img) { state.rows.forEach((row, ri) => { const d = T.detectLanes(signal(), state.img, row); row.pitch = d.pitch; row.lanes = d.xs.map(newLane); }); }
+      if (key === 'polarity' && state.img) state.rows.forEach(row => redetectRow(row, false));
+      // Manual boundaries are tied to the number of bands, so a new product count resets them.
+      if (key === 'products') state.rows.forEach(row => row.lanes.forEach(l => { l.valleys = null; }));
       recompute();
     });
   });
@@ -759,6 +794,7 @@
   els.resetBands.addEventListener('click', () => { const s = selIndex(); if (s) { laneAt(s.ri, s.li).valleys = null; recompute(); } });
   els.removeLane.addEventListener('click', removeSelectedLane);
 
+  els.loadBtn.addEventListener('click', () => els.fileInput.click());
   els.fileInput.addEventListener('change', () => { loadFile(els.fileInput.files[0]); els.fileInput.value = ''; });
   els.sampleBtn.addEventListener('click', loadSample);
 
@@ -800,24 +836,30 @@
     return out;
   }
 
+  /** Quote for CSV and defuse text that a spreadsheet would run as a formula. */
   function csvCell(v) {
-    const s = String(v);
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    let s = String(v);
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   }
+
+  const fixed = (v, d) => (typeof v === 'number' && isFinite(v) ? v.toFixed(d) : '');
 
   function exportCsv() {
     if (!state.result) return;
     const p = state.params, lines = [];
-    lines.push('# T7E1 Gel Analysis ' + VERSION);
-    lines.push('# file: ' + state.name + ', exported ' + new Date().toISOString());
-    lines.push('# formula: ' + (p.formula === 'single' ? 'single allele, 100*(1-sqrt(1-2f))/2' : 'Guschin 2010, 100*(1-sqrt(1-f))') + '; f = (cut1+cut2)/(parent+cut1+cut2)');
-    lines.push('# background: ' + p.background + '; lane width: ' + Math.round(p.laneWidth * 100) + '% of pitch; smoothing sigma: ' + p.smoothing + ' px; products: ' + p.products + '; NC subtracted: ' + (p.subtractNC ? 'yes (mean NC f ' + state.result.ncFc.toFixed(4) + ')' : 'no'));
+    const note = t => lines.push(csvCell('# ' + t));
+    note('T7E1 Gel Analysis ' + VERSION);
+    note('file: ' + state.name + '; exported ' + new Date().toISOString());
+    note('formula: ' + (p.formula === 'single' ? 'single allele 100*(1-sqrt(1-2f))/2' : 'Guschin 2010 100*(1-sqrt(1-f))') + '; f = (cut1+cut2)/(parent+cut1+cut2)');
+    note('background: ' + p.background + '; lane width: ' + Math.round(p.laneWidth * 100) + '% of pitch; smoothing sigma: ' + p.smoothing + ' px; products: ' + p.products + '; NC subtracted: ' + (p.subtractNC ? 'yes (mean NC f ' + state.result.ncFc.toFixed(4) + ')' : 'no'));
     lines.push(['row', 'lane', 'label', 'role', 'x_px', 'parent_area', 'cut1_area', 'cut2_area', 'fraction_cleaved', 'fraction_used', 'editing_pct', 'flags'].join(','));
     lanesForExport().forEach(e => {
       const r = e.r, quant = r.role !== 'marker' && r.role !== 'excluded';
+      const a = quant ? r.areas : [];
       lines.push([e.row, e.lane, csvCell(e.label), r.role, r.x,
-        quant ? r.areas[0].toFixed(2) : '', quant ? r.areas[1].toFixed(2) : '', quant && r.areas.length > 2 ? r.areas[2].toFixed(2) : '',
-        quant ? r.fc.toFixed(4) : '', quant ? r.fcCorrected.toFixed(4) : '', quant && isFinite(r.editing) ? r.editing.toFixed(2) : '',
+        fixed(a[0], 2), fixed(a[1], 2), fixed(a[2], 2),
+        quant ? fixed(r.fc, 4) : '', quant ? fixed(r.fcCorrected, 4) : '', quant ? fixed(r.editing, 2) : '',
         csvCell(r.flags.join('; '))].join(','));
     });
     download(new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' }), baseName() + '-t7e1.csv');
@@ -833,17 +875,25 @@
     x.fillStyle = '#ffffff'; x.fillRect(0, 0, c.width, c.height);
     x.drawImage(els.img, 0, 0);
     const labs = labels();
+    // Text with a halo in the gel's background tone stays readable on dark and light gels.
+    const darkGel = state.params.polarity === 'light';
+    const ink = darkGel ? '#ffffff' : '#000000', halo = darkGel ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)';
+    const label = (text, cx, y, fill) => {
+      x.lineJoin = 'round'; x.lineWidth = 4 * u; x.strokeStyle = halo; x.strokeText(text, cx, y);
+      x.fillStyle = fill; x.fillText(text, cx, y);
+    };
     x.textAlign = 'center';
     state.rows.forEach((row, ri) => state.result.rows[ri].lanes.forEach((r, li) => {
       if (r.role === 'excluded') return;
       const cx = (r.a + r.b) / 2;
       x.font = `600 ${14 * u}px "Barlow Condensed", sans-serif`;
-      x.fillStyle = col.acc7; x.textBaseline = 'bottom';
-      x.fillText(labs[ri][li], cx, row.y0 - 4 * u);
+      x.textBaseline = 'bottom';
+      label(labs[ri][li], cx, row.y0 - 4 * u, darkGel ? ink : col.acc7);
       if (r.role === 'marker') return;
-      x.fillStyle = r.flags.includes('parent saturated') ? col.warn : '#000000'; x.textBaseline = 'top';
+      x.textBaseline = 'top';
       x.font = `600 ${15 * u}px "Barlow Condensed", sans-serif`;
-      x.fillText(Math.round(r.editing) + (r.flags.includes('parent saturated') ? '*' : ''), cx, row.y1 + 4 * u);
+      const sat = r.flags.includes('parent saturated');
+      label(isFinite(r.editing) ? Math.round(r.editing) + (sat ? '*' : '') : '—', cx, row.y1 + 4 * u, sat ? col.warn : ink);
     }));
     const p = state.params;
     x.textAlign = 'left'; x.textBaseline = 'middle'; x.fillStyle = col.text;
