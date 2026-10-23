@@ -98,15 +98,18 @@
         <div class="band-menu" id="bandMenu" role="menu" hidden></div>
         <div class="prof-legend">
           <span>Click a peak to remove it or to set parent and products · drag the square markers to move band boundaries</span>
-          <span><span class="lg-base">— — baseline</span> shaded = band area</span>
+          <span><span class="lg-base">— — baseline</span> shaded = band area · dotted = profile without removed bands</span>
         </div>
       </div>
       <div class="lane-tools">
         <button class="btn btn-secondary zoom" id="zoomBtn" type="button" aria-pressed="false" title="Scale the plot to the cleavage products; the parent peak runs off the top">Zoom to products</button>
+        <button class="btn btn-ghost" id="editBands" type="button" aria-expanded="false" aria-controls="bandList" title="List every detected band of this lane and set its role">Edit bands</button>
         <button class="btn btn-ghost" id="undoBands" type="button" title="Undo the last band change in this lane">Undo</button>
         <button class="btn btn-ghost" id="resetBands" type="button">Reset bands</button>
+        <button class="btn btn-ghost" id="laneType" type="button" hidden title="This lane was recognised as a ladder; measure it as a sample instead">Measure this lane</button>
         <button class="btn btn-ghost" id="removeLane" type="button">Remove lane</button>
       </div>
+      <div class="band-list" id="bandList" hidden></div>
       <div class="stats">
         <div class="stat"><div class="stat-k">Parent area</div><div class="stat-v" id="stParent">—</div></div>
         <div class="stat"><div class="stat-k">Fraction cleaved</div><div class="stat-v" id="stFc">—</div></div>
@@ -142,7 +145,7 @@
       </div>
       <div>
         <h5>Measurement</h5>
-        <p>Each lane is a vertical strip (default half the lane pitch). Its mean profile is smoothed, the parent band is the uppermost strong peak (above about 37% editing a cleavage product is brighter than the parent), and the cleavage products are found at offsets shared by the lanes of the row, measured from each lane's own parent band, so tilted rows work; a lane from a different amplicon uses its own strong bands. Click a peak on the lane profile to remove a band or to choose the parent and products by hand. Areas are summed above a baseline: by default a straight line between the valleys around each band, the way ImageJ Gel Analyzer is used by hand.</p>
+        <p>Each lane is a vertical strip (default half the lane pitch). Its mean profile is smoothed, the parent band is the uppermost strong peak (above about 37% editing a cleavage product is brighter than the parent), and the cleavage products are found at offsets shared by the lanes of the row, measured from each lane's own parent band, so tilted rows work; lanes of other amplicons in the same row are grouped by their band pattern. Click a peak on the lane profile to remove a band or to choose the parent and products by hand. Areas are summed above a baseline: by default a straight line between the valleys around each band, the way ImageJ Gel Analyzer is used by hand.</p>
       </div>
       <div>
         <h5>Checks</h5>

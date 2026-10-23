@@ -16,6 +16,7 @@
     resetParams: $('resetParams'),
     chips: $('laneChips'), selTitle: $('selTitle'), prof: $('profCanvas'),
     resetBands: $('resetBands'), undoBands: $('undoBands'), removeLane: $('removeLane'), zoomBtn: $('zoomBtn'),
+    editBands: $('editBands'), bandList: $('bandList'), laneType: $('laneType'),
     stParent: $('stParent'), stFc: $('stFc'), stEd: $('stEd'), selFlags: $('selFlags'),
     resBody: $('resBody'), resHint: $('resHint')
   };
@@ -71,7 +72,7 @@
   }
   const WARN = ['parent saturated', 'product saturated', 'weak lane', 'band cut by the box edge', 'band at the top of the box: a well?',
     'unassigned band inside the measured range', 'band above the parent', 'extra band not matching the cleavage products',
-    'check band assignment', 'only one cleavage product found'];
+    'check band assignment', 'only one cleavage product found', 'removed band overlaps a measured band'];
   function isWarn(f) { return WARN.includes(f) || /invalid|second product visible/.test(f); }
   const MAX_PIXELS = 40e6;
 
@@ -280,6 +281,7 @@
   }
 
   function recompute() {
+    if (els.bandMenu) els.bandMenu.hidden = true;   // its band and lane may no longer exist
     if (!state.img) { state.result = null; render(); return; }
     state.rows.forEach(row => row.lanes.sort((a, b) => a.x - b.x));
     state.result = state.rows.length ? T.analyze(state.img, state.rows, state.params, signal()) : null;
@@ -399,7 +401,7 @@
       chip.className = 'row-chip';
       const t = document.createElement('span');
       t.textContent = 'Row ' + (ri + 1) + ' · ' + row.lanes.length + ' lanes';
-      const re = button('Detect lanes', () => redetect(ri), 'Find the lanes in this row again. Moved or added lanes and band boundaries are reset; labels are kept.');
+      const re = button('Detect lanes', () => redetect(ri), 'Find the lanes in this row again. Moved or added lanes, band choices and band boundaries are reset; labels are kept.');
       const rm = button('Remove', () => removeRow(ri), 'Remove this row');
       chip.append(t, re, rm);
       els.rowsBar.appendChild(chip);
@@ -444,6 +446,10 @@
     els.selTitle.textContent = s ? 'Row ' + (s.ri + 1) + ' · Lane ' + labs[s.ri][s.li] : '—';
     els.resetBands.disabled = !lane || (!lane.valleys && !lane.bands);
     els.undoBands.disabled = !lane || !(lane.undo && lane.undo.length);
+    els.editBands.disabled = !r || r.role === 'marker' || r.role === 'excluded';
+    els.laneType.hidden = !r || !(r.role === 'marker' || (lane && lane.role === 'sample'));
+    els.laneType.textContent = r && r.role === 'marker' ? 'Measure this lane' : 'Automatic lane type';
+    if (els.bandList) renderBandList(s, r);
     els.removeLane.disabled = !lane;
     const quant = r && r.role !== 'marker' && r.role !== 'excluded';
     els.stParent.textContent = quant ? fmtInt(r.areas[0]) : '—';
@@ -650,7 +656,8 @@
       'band at the top of the box: a well?': 'well?', 'unassigned band inside the measured range': 'unassigned band', 'band above the parent': 'band above',
       'extra band not matching the cleavage products': 'extra band', 'check band assignment': 'check bands', 'no cleavage products found': 'no products',
       'manual band boundaries': 'edited', 'only one cleavage product found': 'one product', 'second product visible: set two products': 'second product?',
-      'cleavage product brighter than parent': 'brighter product', 'manual band assignment': 'bands set' })[f] ||
+      'cleavage product brighter than parent': 'brighter product', 'manual band assignment': 'bands set',
+      'removed band overlaps a measured band': 'overlap', 'product positions differ from the row': 'other pattern' })[f] ||
       f.replace('product ', 'P').replace(' not detected', ' missing').replace(/fraction cleaved > 0.5.*/, 'f > 0.5');
   }
 
@@ -776,7 +783,7 @@
     const S = profScale(r);
     let best = -1, bd = 9;
     r.valleys.forEach((v, k) => { const d = Math.abs(S.X(v) - mx); if (d < bd) { bd = d; best = k; } });
-    const peak = peakAt(r, S, mx);
+    const peak = peakAt(r, S, mx, e.pointerType === 'touch' ? 22 : 10);
     // Near a boundary marker (or in the handle strip at the bottom) drag it; otherwise a peak opens its menu.
     if (peak != null && (best < 0 || (my < S.h - PAD.b - 14 && Math.abs(S.X(peak) - mx) < bd))) {
       e.preventDefault();
@@ -831,7 +838,7 @@
       saveParams();
       if (key === 'polarity' && state.img) state.rows.forEach(row => redetectRow(row, false));
       // Manual boundaries are tied to the number of bands, so a new product count resets them.
-      if (key === 'products') state.rows.forEach(row => row.lanes.forEach(l => { l.valleys = null; }));
+      if (key === 'products') state.rows.forEach(row => row.lanes.forEach(l => { if (l.valleys) { saveUndo(l); l.valleys = null; } }));
       recompute();
     });
   });
@@ -842,7 +849,7 @@
     const oldPol = state.params.polarity, oldProducts = state.params.products;
     state.params = Object.assign({}, T.DEFAULTS, { polarity: state.img ? T.detectPolarity(state.img) : oldPol });
     if (state.img && state.params.polarity !== oldPol) state.rows.forEach(row => redetectRow(row, false));
-    if (state.params.products !== oldProducts) state.rows.forEach(row => row.lanes.forEach(l => { l.valleys = null; }));
+    if (state.params.products !== oldProducts) state.rows.forEach(row => row.lanes.forEach(l => { if (l.valleys) { saveUndo(l); l.valleys = null; } }));
     saveParams();
     recompute();
   });
@@ -864,19 +871,19 @@
 
   // ------------------------------------------------------------ band menu (remove or assign a peak)
 
-  /** Nearest clickable peak (assigned, removed or detected) within 10 px of the pointer. */
-  function peakAt(r, S, mx) {
+  /** Nearest clickable peak (assigned, removed or detected) within `radius` px of the pointer. */
+  function peakAt(r, S, mx, radius) {
     const all = r.peaks.concat(r.removed || [], r.candidates || []);
-    let best = null, bd = 10;
+    let best = null, bd = radius || 10;
     all.forEach(i => { const d = Math.abs(S.X(i) - mx); if (d < bd) { bd = d; best = i; } });
     return best;
   }
 
   function bandRole(r, i) {
-    const k = r.peaks.findIndex(pk => Math.abs(pk - i) <= 2);
+    const k = r.peaks.findIndex(pk => Math.abs(pk - i) <= 3);
     if (k === 0) return 'parent';
     if (k > 0) return 'p' + k;
-    return (r.removed || []).some(j => Math.abs(j - i) <= 2) ? 'removed' : 'none';
+    return (r.removed || []).some(j => Math.abs(j - i) <= 3) ? 'removed' : 'none';
   }
 
   /** Remember a lane's band choices and boundaries so the next edit can be undone. */
@@ -917,7 +924,7 @@
       btn.addEventListener('click', ev => { ev.stopPropagation(); fn(); closeBandMenu(); recompute(); els.prof.focus(); });
       m.appendChild(btn);
     };
-    if (role !== 'removed' && role !== 'parent') add('Remove this band', () => setBand(lane, absY, 'removed'));
+    if (role !== 'removed') add('Remove this band', () => setBand(lane, absY, 'removed'));
     if (role === 'removed') add('Restore', () => setBand(lane, absY, 'auto'));
     if (role !== 'parent') add('Use as parent', () => setBand(lane, absY, 'parent'));
     if (role !== 'p1') add('Use as product 1', () => setBand(lane, absY, 'p1'));
@@ -928,9 +935,71 @@
     const left = c.left - frame.left + S.X(i) + 8, top = c.top - frame.top + Math.max(PAD.t, S.Y(r.profile[i]) - 10);
     m.style.left = Math.min(left, frame.width - m.offsetWidth - 4) + 'px';
     m.style.top = Math.min(top, frame.height - m.offsetHeight - 4) + 'px';
-    const first = m.querySelector('button');
-    if (first) first.focus();
+    m.tabIndex = -1;
+    m.focus();   // the first item may be destructive: Enter must not trigger it by accident
   }
+
+  els.bandMenu.addEventListener('keydown', e => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const items = Array.from(els.bandMenu.querySelectorAll('button'));
+    const i = items.indexOf(document.activeElement);
+    const j = e.key === 'ArrowDown' ? (i + 1) % items.length : (i <= 0 ? items.length - 1 : i - 1);
+    items[j].focus();
+  });
+
+  // Edit bands: every detected band of the lane in a list, each with a role (keyboard and touch friendly).
+  function renderBandList(s, r) {
+    const box = els.bandList;
+    const open = els.editBands.getAttribute('aria-expanded') === 'true';
+    box.hidden = !open || !r || r.role === 'marker' || r.role === 'excluded';
+    if (box.hidden) return;
+    const lane = laneAt(s.ri, s.li), b = lane.bands || {};
+    const all = [];
+    r.peaks.concat(r.removed || [], r.candidates || []).forEach(i => { if (!all.some(j => Math.abs(j - i) <= 3)) all.push(i); });
+    all.sort((a, c) => a - c);
+    box.textContent = '';
+    const table = document.createElement('table');
+    all.forEach(i => {
+      const absY = i + r.y0, role = bandRole(r, i);
+      const manualRole = Math.abs((b.parent ?? -99) - absY) <= 3 ? 'parent'
+        : (b.products || []).findIndex(v => v != null && Math.abs(v - absY) <= 3) === 0 ? 'p1'
+        : (b.products || []).findIndex(v => v != null && Math.abs(v - absY) <= 3) === 1 ? 'p2'
+        : (b.removed || []).some(v => Math.abs(v - absY) <= 3) ? 'removed' : 'auto';
+      const tr = document.createElement('tr');
+      const td = (t, cls) => { const d = document.createElement('td'); if (cls) d.className = cls; if (t instanceof Node) d.appendChild(t); else d.textContent = t; tr.appendChild(d); };
+      td(i + ' px', 'num');
+      td(({ parent: 'parent', p1: 'product 1', p2: 'product 2', removed: 'removed', none: '' })[role]);
+      const sel = document.createElement('select');
+      sel.setAttribute('aria-label', 'Role of the band at ' + i + ' px');
+      [['auto', 'Automatic'], ['parent', 'Parent'], ['p1', 'Product 1'], ['p2', 'Product 2'], ['removed', 'Removed']]
+        .filter(([v]) => v !== 'p2' || state.params.products === 2)
+        .forEach(([v, t]) => { const o = document.createElement('option'); o.value = v; o.textContent = t; sel.appendChild(o); });
+      sel.value = manualRole;
+      sel.addEventListener('change', () => { setBand(lane, absY, sel.value); recompute(); });
+      td(sel);
+      table.appendChild(tr);
+    });
+    box.appendChild(table);
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = 'Automatic lets the analysis decide. A removed band is never used as parent or product and its area is not counted.';
+    box.appendChild(hint);
+  }
+
+  els.laneType.addEventListener('click', () => {
+    const s = selIndex(), r = s && resLane(s.ri, s.li);
+    if (!r) return;
+    const lane = laneAt(s.ri, s.li);
+    lane.role = r.role === 'marker' ? 'sample' : null;   // a lane taken for a ladder is measured anyway
+    recompute();
+  });
+
+  els.editBands.addEventListener('click', () => {
+    const open = els.editBands.getAttribute('aria-expanded') !== 'true';
+    els.editBands.setAttribute('aria-expanded', String(open));
+    renderLane();
+  });
 
   function closeBandMenu() { els.bandMenu.hidden = true; }
 
@@ -1083,7 +1152,7 @@
       ['Formula', '% editing = 100*(1-sqrt(1-f)), f = (cut1+cut2)/(parent+cut1+cut2) (Guschin 2010, NEB)'],
       ['Background', p.background], ['Lane width (% of pitch)', Math.round(p.laneWidth * 100)],
       ['Smoothing sigma (px)', p.smoothing], ['Cleavage products', p.products],
-      ['Image', state.img.w + ' x ' + state.img.h + ' px, ' + state.img.bits + '-bit']];
+      ['Image', state.img.w + ' x ' + state.img.h + ' px, ' + state.img.bits + '-bit' + (state.img.storedBits > state.img.bits ? ' data in a ' + state.img.storedBits + '-bit file' : '')]];
     const data = XLSX.build([
       { name: 'Results', rows, widths: [6, 6, 10, 9, 8, 12, 11, 11, 15, 11, 60] },
       { name: 'Settings', rows: settings, widths: [26, 70] }

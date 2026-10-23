@@ -313,3 +313,58 @@ test('products and parent chosen by hand are used', () => {
     assert.ok(Math.abs(l.editing - 25) <= 1.5, `lane ${i}: ${l.editing.toFixed(2)}`);
   });
 });
+
+test('removing the band taken as parent makes the next band the parent', () => {
+  // A strong band above the real parent (for example a heteroduplex) is taken as parent until removed.
+  const lanes = [60, 160, 260, 360].map(x => ({ x, bands: [[12, 0.9]].concat(t7Bands(20)) }));
+  const img = bandGel(lanes, { w: 500 });
+  const box = { x0: 0, x1: 500, y0: 2, y1: 135 };
+  const sig = T.signalImage(img, 'dark');
+  const d = T.detectLanes(sig, img, box);
+  const rows = [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null, bands: { parent: null, products: [null, null], removed: [12] } })) })];
+  const res = T.analyze(img, rows, { polarity: 'dark' }).rows[0];
+  res.lanes.forEach((l, i) => {
+    assert.equal(l.peaks[0] + l.y0, 30, `lane ${i} parent`);
+    // The artefact is heavier than the parent and 18 px above it; its Gaussian estimate takes a little of the parent.
+    assert.ok(Math.abs(l.editing - 20) <= 2, `lane ${i}: ${l.editing.toFixed(2)}`);
+  });
+});
+
+test('a removed band just below the last product is not counted in it', () => {
+  const p = 0.2, fc = 1 - (1 - p) ** 2;
+  const lanes = [60, 160, 260, 360].map(x => ({ x, bands: [[30, 1 - fc], [70, fc * 2 / 3], [115, fc / 3], [135, 0.3]] }));
+  const img = bandGel(lanes, { w: 500, h: 170 });
+  const box = { x0: 0, x1: 500, y0: 5, y1: 165 };
+  const sig = T.signalImage(img, 'dark');
+  const d = T.detectLanes(sig, img, box);
+  const rows = [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null, bands: { parent: null, products: [null, null], removed: [135] } })) })];
+  const res = T.analyze(img, rows, { polarity: 'dark' }).rows[0];
+  res.lanes.forEach((l, i) => {
+    assert.deepEqual(l.peaks.map(y => y + l.y0), [30, 70, 115], `lane ${i} bands`);
+    assert.ok(Math.abs(l.editing - 20) <= 1.5, `lane ${i}: ${l.editing.toFixed(2)}`);
+  });
+});
+
+test('an extra band repeated in a lane group does not silently replace a product', () => {
+  const A = [[30, 0.64], [70, 0.24], [115, 0.12]];
+  const B = [[30, 0.64], [75, 0.24], [105, 0.12], [90, 0.15]];
+  const lanes = ['A', 'B', 'B', 'A', 'A', 'B', 'A'].map((k, i) => ({ x: 60 + i * 110, bands: k === 'A' ? A : B }));
+  const row = analyseBox(bandGel(lanes, { w: 840, h: 170 }), { x0: 0, x1: 840, y0: 5, y1: 160 });
+  assertNotSilent(row, lanes.map(() => 20), 'grouped extra band');
+});
+
+test('using the automatic product 1 as product 2 does not give one band two roles', () => {
+  const lanes = [60, 160, 260, 360].map(x => ({ x, bands: [[30, 0.64], [70, 0.24], [115, 0.12]] }));
+  const img = bandGel(lanes, { w: 500, h: 170 });
+  const box = { x0: 0, x1: 500, y0: 5, y1: 160 };
+  const sig = T.signalImage(img, 'dark');
+  const d = T.detectLanes(sig, img, box);
+  const rows = [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null, bands: { parent: null, products: [null, 70], removed: [] } })) })];
+  const res = T.analyze(img, rows, { polarity: 'dark' }).rows[0];
+  res.lanes.forEach((l, i) => {
+    // Only detected bands count; a product that is not detected only marks where it was expected.
+    const ys = l.peaks.filter((_, k) => l.found[k]).map(y => y + l.y0);
+    assert.equal(new Set(ys.map(y => Math.round(y / 4))).size, ys.length, `lane ${i}: distinct bands ${ys}`);
+  });
+  assertNotSilent(res, [20, 20, 20, 20], 'swapped product');
+});

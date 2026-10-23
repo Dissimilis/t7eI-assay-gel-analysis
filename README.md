@@ -32,7 +32,7 @@ The pipeline for each row:
 
 - **Lanes.** The lane pitch comes from the autocorrelation of the row's column profile. Lane centres are the half-maximum midpoints of the peaks above a rolling-ball background. Empty wells produce no peak and are skipped.
 - **Profiles.** Each lane is a vertical strip, half the lane pitch wide by default. Its mean signal per pixel row is smoothed with a Gaussian (σ 1.5 px).
-- **Bands.** The parent band is the uppermost strong peak; above about 37% editing the larger cleavage product is brighter than the parent, so the strongest peak is not always the parent. In rows with three or more sample lanes, the cleavage products are located at offsets shared by the lanes, measured from each lane's own parent band. Rows can mix amplicons: lanes whose two strongest lower bands agree form a group, each group of two or more lanes gives a product pattern, and every lane takes the pattern and parent that explain its bands best. A product only has to stand three times above the profile noise, so faint products next to a strong parent are found. Tilted rows and slight smiling therefore work, and a faint product is still found where its brighter neighbours put it. In smaller rows each lane uses its own strongest products (two, or one in *One* mode).
+- **Bands.** The parent band is the uppermost strong peak; above about 37% editing the larger cleavage product is brighter than the parent, so the strongest peak is not always the parent. In rows with three or more sample lanes, the cleavage products are located at offsets shared by the lanes, measured from each lane's own parent band. Rows can mix amplicons: lanes whose two strongest lower bands agree form a group, each group of two or more lanes gives a product pattern, and every interior lane takes the pattern and parent that explain its bands best (the first and last lane keep the row's main pattern, as ladders sit there). A product only has to stand three times above the profile noise, so faint products next to a strong parent are found. Tilted rows and slight smiling therefore work, and a faint product is still found where its brighter neighbours put it. In smaller rows each lane uses its own strongest products (two, or one in *One* mode).
 - **Background.** By default a straight line joins the valleys on either side of each band (*Valley*), which is how ImageJ Gel Analyzer is used by hand. *Envelope* draws one line under the whole lane. *Blend* starts from the valley line and moves it towards the envelope where smear lifts the valleys between bands.
 - **Areas.** Each band's area is the profile summed above the baseline between its two boundaries. You can drag the boundary markers on the profile plot; the lane is then marked *edited*. A band removed by hand is modelled as a Gaussian peak and subtracted before its neighbours are measured, so its tails do not lift their baselines.
 - **Ladders.** Ladders sit at the ends of a row, so only the first or last lane is marked as a marker: when it has four or more strong bands, or strong bands that match neither the parent nor the product positions. An interior lane like that is measured as a sample, with an extra-band warning or with product positions of its own. Markers take no part in finding the product positions and are not quantified.
@@ -51,7 +51,7 @@ Settings are remembered in the browser. **Reset defaults** restores them. Changi
 
 Keyboard: with a lane selected, ← and → move it (Shift for 5 px), [ and ] select the previous or next lane, and Delete removes it. **Load image** and every control are reachable with Tab; drawing a row and moving band boundaries need a pointer.
 
-Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit camera data are scaled by that range, so the saturation check still works. Floating-point TIFFs are read, but clipping cannot be checked in them.
+Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit camera data are scaled by that range, so the saturation check still works; 8-bit data saved in a 16-bit file is recognised and reported as 8-bit. A lane taken for a ladder can be measured anyway with **Measure this lane**. Floating-point TIFFs are read, but clipping cannot be checked in them.
 
 ### Quality flags
 
@@ -74,7 +74,8 @@ Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit c
 | band above | A band above the parent: often a faint parent at very high editing, or a well. Check the band assignment. |
 | edited | Band boundaries were moved by hand (`manual band boundaries` in the export). |
 | bands set | Bands were removed or assigned by hand (`manual band assignment`). |
-| product positions differ from the row | The lane does not show the row's shared products but has two strong bands of its own, so it uses those (rows can mix amplicons). |
+| overlap | A removed band runs into a measured band, so its share cannot be separated cleanly; check the value. |
+| other pattern | The lane follows a different product pattern than most lanes of its row (rows can mix amplicons; `product positions differ from the row`). |
 
 The CSV export prefixes labels that start with `=`, `+`, `-` or `@` with an apostrophe, so spreadsheets do not run them as formulas.
 
