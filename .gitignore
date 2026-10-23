@@ -1,0 +1,4 @@
+# Local reference material (lab images, design export): not published
+reference/
+*.pgm
+node_modules/

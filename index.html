@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T7E1 Gel Analysis</title>
+<meta name="description" content="Densitometry of T7 endonuclease I (T7E1) mismatch-cleavage gels: % CRISPR editing per lane, in the browser.">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/industry.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div class="app">
+  <header class="nav top">
+    <div class="nav-brand brand">T7E1 Gel Analysis<span class="brand-sub">CRISPR editing densitometry</span></div>
+    <span class="tag tag-neutral file-tag" id="fileName">no image</span>
+    <label class="btn btn-secondary" title="Load a gel image (PNG, JPEG, TIFF)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>
+      Load image
+      <input type="file" id="fileInput" accept="image/*,.tif,.tiff" hidden>
+    </label>
+    <button class="btn btn-secondary" id="sampleBtn" type="button">Sample gel</button>
+    <button class="btn btn-secondary" id="pngBtn" type="button" title="Annotated figure with % editing under each lane">Figure PNG</button>
+    <button class="btn btn-secondary" id="jsonBtn" type="button" title="Parameters, lane geometry and results">JSON</button>
+    <button class="btn btn-primary blueprint" id="csvBtn" type="button">
+      <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+      Export CSV
+    </button>
+  </header>
+
+  <main class="grid">
+    <section class="col">
+      <div class="sec-head">
+        <span class="sec-num">01</span>
+        <h3>Image</h3>
+        <span class="sec-hint">Drag a box over each row of bands · drag a lane to move it · double-click to add a lane</span>
+      </div>
+      <div class="blueprint frame" id="dropZone">
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <div class="stage">
+          <canvas id="imgCanvas" class="img-canvas"></canvas>
+          <canvas id="ovCanvas" class="ov-canvas" tabindex="0" aria-label="Gel image. Drag to mark a row of bands."></canvas>
+          <div class="empty" id="emptyMsg">Drop a gel image here, or load the sample gel.</div>
+        </div>
+      </div>
+
+      <div class="rows-bar" id="rowsBar"></div>
+
+      <div class="controls">
+        <div class="field">
+          <label>Bands</label>
+          <div class="seg" data-param="polarity">
+            <label class="seg-opt"><input type="radio" name="polarity" value="dark">Dark on light</label>
+            <label class="seg-opt"><input type="radio" name="polarity" value="light">Light on dark</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>Background</label>
+          <div class="seg" data-param="background">
+            <label class="seg-opt" title="Straight line between the valleys on either side of each band, as drawn in ImageJ Gel Analyzer"><input type="radio" name="background" value="valley">Valley</label>
+            <label class="seg-opt" title="Valley baseline, moved towards one line under the whole lane where smear lifts the valleys"><input type="radio" name="background" value="blend">Blend</label>
+            <label class="seg-opt" title="One straight line under all bands of the lane"><input type="radio" name="background" value="envelope">Envelope</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>Cleavage products</label>
+          <div class="seg" data-param="products">
+            <label class="seg-opt"><input type="radio" name="products" value="2">Two</label>
+            <label class="seg-opt"><input type="radio" name="products" value="1">One</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>Formula</label>
+          <div class="seg" data-param="formula">
+            <label class="seg-opt" title="100 × (1 − √(1 − fraction cleaved)), Guschin et al. 2010: a mix of different indels"><input type="radio" name="formula" value="guschin">Diverse indels</label>
+            <label class="seg-opt" title="100 × (1 − √(1 − 2 × fraction cleaved)) / 2: one dominant mutant allele"><input type="radio" name="formula" value="single">Single allele</label>
+          </div>
+        </div>
+        <div class="field">
+          <label for="laneWidth">Lane width · <span id="laneWidthVal"></span>% of pitch</label>
+          <input type="range" id="laneWidth" min="20" max="90" step="5" class="range">
+        </div>
+        <div class="field">
+          <label for="smoothing">Smoothing · σ <span id="smoothingVal"></span> px</label>
+          <input type="range" id="smoothing" min="0" max="4" step="0.5" class="range">
+        </div>
+        <div class="field field-inline">
+          <label class="check"><input type="checkbox" id="subtractNC"><span class="box"></span>Subtract NC background</label>
+          <button class="btn btn-ghost" id="resetParams" type="button">Reset defaults</button>
+        </div>
+      </div>
+      <div class="meta" id="imgMeta"></div>
+    </section>
+
+    <section class="col">
+      <div class="sec-head">
+        <span class="sec-num">02</span>
+        <h3>Lane profile</h3>
+        <span class="sec-title" id="selTitle">—</span>
+      </div>
+      <div class="chips" id="laneChips"></div>
+      <div class="blueprint frame prof-frame">
+        <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+        <canvas id="profCanvas" class="prof-canvas" aria-label="Lane profile"></canvas>
+        <div class="prof-legend">
+          <span>Signal vs. distance from region top (px) · drag the markers to move band boundaries</span>
+          <span><span class="lg-base">— — baseline</span> shaded = band area</span>
+        </div>
+      </div>
+      <div class="lane-tools">
+        <div class="seg" id="roleSeg">
+          <label class="seg-opt"><input type="radio" name="role" value="sample">Sample</label>
+          <label class="seg-opt"><input type="radio" name="role" value="nc">NC</label>
+          <label class="seg-opt"><input type="radio" name="role" value="marker">Marker</label>
+          <label class="seg-opt"><input type="radio" name="role" value="excluded">Exclude</label>
+        </div>
+        <button class="btn btn-ghost" id="autoRole" type="button" title="Let the analysis decide the role">Auto role</button>
+        <button class="btn btn-ghost" id="resetBands" type="button">Reset bands</button>
+        <button class="btn btn-ghost" id="removeLane" type="button">Remove lane</button>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="stat-k">Parent area</div><div class="stat-v" id="stParent">—</div></div>
+        <div class="stat"><div class="stat-k">Fraction cleaved</div><div class="stat-v" id="stFc">—</div></div>
+        <div class="stat"><div class="stat-k">% editing</div><div class="stat-v" id="stEd">—</div></div>
+      </div>
+      <div class="flags" id="selFlags"></div>
+
+      <div class="sec-head results-head">
+        <span class="sec-num">03</span>
+        <h3>Results</h3>
+        <span class="sec-hint" id="resHint"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="table results">
+          <thead>
+            <tr><th>Lane</th><th>Label</th><th>Role</th><th class="num">Parent</th><th class="num">Cut 1</th><th class="num">Cut 2</th><th class="num">Fraction</th><th class="num">% edit</th><th class="bar-col"></th><th>QC</th></tr>
+          </thead>
+          <tbody id="resBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <section class="about">
+    <div class="sec-head">
+      <span class="sec-num">04</span>
+      <h3>Method</h3>
+    </div>
+    <div class="about-grid">
+      <div>
+        <h5>Formula</h5>
+        <p>% editing = 100 × (1 − √(1 − f)), with f = (b + c) / (a + b + c): <em>a</em> is the uncut parent band, <em>b</em> and <em>c</em> the two T7E1 cleavage products. This is the formula of Guschin et al. (2010, <em>Methods Mol Biol</em> 649:247–256) used in the NEB T7E1 protocol. It assumes random reannealing of a mix of different indels. For one dominant mutant allele the <em>Single allele</em> option uses f = 2p(1 − p) instead.</p>
+      </div>
+      <div>
+        <h5>Measurement</h5>
+        <p>Each lane is a vertical strip (default half the lane pitch). Its mean profile is smoothed, the parent band is the strongest peak, and the cleavage products are found at offsets shared by the lanes of the row, measured from each lane's own parent band, so tilted rows work. Areas are summed above a straight baseline between the valleys around each band, the way ImageJ Gel Analyzer is used by hand.</p>
+      </div>
+      <div>
+        <h5>Checks</h5>
+        <p>Clipped (saturated) parent bands, faint or missing products, weak lanes and bands cut by the region edge are flagged. A clipped parent makes % editing read too high. JPEG files from imagers are often contrast-stretched; a raw 16-bit TIFF gives more reliable numbers. Everything runs in this browser: images never leave the computer.</p>
+      </div>
+    </div>
+    <p class="foot"><a href="https://github.com/Dissimilis/t7eY-assay-gel-analysis">Source, documentation and validation on GitHub</a></p>
+  </section>
+</div>
+<script src="js/analysis.js"></script>
+<script src="js/tiff.js"></script>
+<script src="js/sample.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

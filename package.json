@@ -1,0 +1,10 @@
+{
+  "name": "t7e1-gel-analysis",
+  "version": "1.0.0",
+  "description": "Densitometry of T7E1 mismatch-cleavage gels in the browser",
+  "private": true,
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test \"tests/*.test.js\""
+  }
+}
