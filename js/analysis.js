@@ -577,9 +577,10 @@
       const lastHeight = Math.max(heights[heights.length - 1], noise);
       // A boundary at the end of the profile while the signal is still sloping there means the box cut a band tail.
       // Pixel noise from curvature: a short box full of band flanks would inflate the slope-based estimate.
-      const en = Math.max(1e-3, curvatureNoise(q.p));
-      const topCut = valleys[0] <= 1 && n > 4 && ps[3] - ps[0] > 3 * en && ps[0] - lo > 0.05 * hP + 3 * en;
-      const bottomCut = last >= n - 2 && n > 4 && ps[n - 4] - ps[n - 1] > 3 * en && ps[n - 1] - lo > 0.05 * lastHeight + 3 * en;
+      // The edge level is read from the smoothed profile, so it is judged against that profile's own noise.
+      const en = Math.max(1e-3, curvatureNoise(q.p)), enS = Math.max(1e-3, curvatureNoise(ps));
+      const topCut = valleys[0] <= 1 && n > 4 && ps[3] - ps[0] > 3 * en && ps[0] - lo > 0.05 * hP + 3 * enS;
+      const bottomCut = last >= n - 2 && n > 4 && ps[n - 4] - ps[n - 1] > 3 * en && ps[n - 1] - lo > 0.05 * lastHeight + 3 * enS;
       if (P <= 1 || (valleys[0] <= 1 && ps[0] - lo > 0.2 * hP) || topCut || bottomCut || (last >= n - 2 && ps[n - 1] - lo > 0.5 * lastHeight + 3 * noise)) {
         flags.push('band cut by the box edge');
       } else if (P <= Math.max(3, 0.06 * n)) {
