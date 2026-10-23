@@ -248,6 +248,8 @@ test('bands cut by the box edge are flagged', () => {
   assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0: 25, y1: 140 }), [25, 25, 25, 25], 'top cut');
   for (const y1 of [100, 102, 103, 105, 110]) assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0: 5, y1 }), [25, 25, 25, 25], 'bottom cut at ' + y1);
   for (const y0 of [18, 22, 25]) assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0, y1: 140 }), [25, 25, 25, 25], 'top cut at ' + y0);
+  // Tight at both ends: a short box must not hide the cut behind an inflated noise estimate.
+  for (const [y0, y1] of [[11, 103], [21, 116], [20, 104]]) assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0, y1 }), [25, 25, 25, 25], `box ${y0}-${y1}`);
 });
 
 test('very high editing (70-80%) is not reported as about 18% without a warning', () => {
