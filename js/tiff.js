@@ -18,8 +18,8 @@
 
   function isTiff(buf) {
     const b = new Uint8Array(buf, 0, Math.min(4, buf.byteLength));
-    return b.length === 4 && ((b[0] === 0x49 && b[1] === 0x49 && b[2] === 42 && b[3] === 0) ||
-                              (b[0] === 0x4d && b[1] === 0x4d && b[2] === 0 && b[3] === 42));
+    return b.length === 4 && ((b[0] === 0x49 && b[1] === 0x49 && (b[2] === 42 || b[2] === 43) && b[3] === 0) ||
+                              (b[0] === 0x4d && b[1] === 0x4d && b[2] === 0 && (b[3] === 42 || b[3] === 43)));
   }
 
   function readIfd(dv, le) {
@@ -131,6 +131,8 @@
   }
 
   async function decode(buf) {
+    const head = new Uint8Array(buf, 0, Math.min(4, buf.byteLength));
+    if (head.length === 4 && (head[2] === 43 || head[3] === 43) && (head[0] === 0x49 || head[0] === 0x4d)) throw new Error('BigTIFF files are not supported: save as a regular TIFF');
     if (!isTiff(buf)) throw new Error('Not a TIFF file');
     try {
       return await decodeTiff(buf);

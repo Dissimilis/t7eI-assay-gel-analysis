@@ -9,7 +9,7 @@ Densitometry for T7 endonuclease I (T7E1) mismatch-cleavage assays. Load a photo
 ## Quick start
 
 1. Open the app and press **Load image**, or drop a PNG, JPEG or TIFF onto the image area. Pasting from the clipboard works too.
-2. Drag a box over one row of bands. Include the parent band and both cleavage products, and leave the wells out. The app finds the loaded lanes, recognises the ladder and skips empty wells. Repeat for every row of the gel.
+2. Drag a box over one row of bands. Include the parent band and both cleavage products with a little background above and below, and leave the wells out. The app finds the loaded lanes, recognises the ladder and skips empty wells. Repeat for every row of the gel.
 3. Check the results table and the lane profile. Remove lanes you don't need (**Remove lane** or Delete) and give lanes your own labels. Every setting has an ⓘ button that explains what it does.
 4. Export the numbers as **CSV**, or an annotated **Figure PNG** with % editing under every lane.
 
@@ -32,7 +32,7 @@ The pipeline for each row:
 
 - **Lanes.** The lane pitch comes from the autocorrelation of the row's column profile. Lane centres are the half-maximum midpoints of the peaks above a rolling-ball background. Empty wells produce no peak and are skipped.
 - **Profiles.** Each lane is a vertical strip, half the lane pitch wide by default. Its mean signal per pixel row is smoothed with a Gaussian (σ 1.5 px).
-- **Bands.** The parent band is the uppermost strong peak; above about 37% editing the larger cleavage product is brighter than the parent, so the strongest peak is not always the parent. In rows with three or more sample lanes, the cleavage products are located at offsets shared by the lanes of the row, measured from each lane's own parent band, and each lane's parent is checked against those offsets. A product only has to stand three times above the profile noise, so faint products next to a strong parent are found. Tilted rows and slight smiling therefore work, and a faint product is still found where its brighter neighbours put it. In smaller rows each lane uses its own two strongest products.
+- **Bands.** The parent band is the uppermost strong peak; above about 37% editing the larger cleavage product is brighter than the parent, so the strongest peak is not always the parent. In rows with three or more sample lanes, the cleavage products are located at offsets shared by the lanes of the row, measured from each lane's own parent band, and each lane's parent is checked against those offsets. A product only has to stand three times above the profile noise, so faint products next to a strong parent are found. Tilted rows and slight smiling therefore work, and a faint product is still found where its brighter neighbours put it. In smaller rows each lane uses its own strongest products (two, or one in *One* mode).
 - **Background.** By default a straight line joins the valleys on either side of each band (*Valley*), which is how ImageJ Gel Analyzer is used by hand. *Envelope* draws one line under the whole lane. *Blend* starts from the valley line and moves it towards the envelope where smear lifts the valleys between bands.
 - **Areas.** Each band's area is the profile summed above the baseline between its two boundaries. You can drag the boundary markers on the profile plot; the lane is then marked *edited*.
 - **Ladders.** A lane with four or more strong bands, or with strong bands that match neither the parent nor the product positions, is marked as a marker. Markers take no part in finding the product positions and are not quantified.
@@ -70,7 +70,10 @@ Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit c
 | extra band | A band that matches neither the parent nor the products appears in most lanes, for example a primer dimer. It is not counted. |
 | check bands | In most lanes of the row a product looks brighter than the parent. That happens above about 37% editing, but more often the box includes the wells or a band above the parents. |
 | weak | The lane's strongest band is barely above background. |
-| edge | The parent band touches the box edge. Draw the box a little larger. |
+| edge | A band is cut by the box edge, so part of it is missing and the baseline is lifted. Draw the box a little larger. |
+| well? | The parent sits at the very top of the box, which usually means a well is inside the box. Start the box just above the parent bands. |
+| unassigned band | A band inside the measured range is neither the parent nor a product, so its signal may be counted. |
+| band above | A band above the parent: often a faint parent at very high editing, or a well. Check the band assignment. |
 | edited | Band boundaries were moved by hand (`manual band boundaries` in the CSV). |
 
 The CSV export prefixes labels that start with `=`, `+`, `-` or `@` with an apostrophe, so spreadsheets do not run them as formulas.
@@ -114,6 +117,7 @@ node --test "tests/*.test.js"
 | `css/` | Industry design system and app styles |
 | `fonts/` | Barlow and Barlow Condensed (SIL Open Font License) |
 | `tests/` | Node test suite and TIFF fixtures |
+| `docs/` | Screenshot and example figure for this README |
 
 ## References
 

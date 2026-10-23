@@ -68,7 +68,9 @@
       bg: cssVar('--color-bg', '#f2f2f3'), warn: cssVar('--color-warn', '#a8552e')
     };
   }
-  const WARN = ['parent saturated', 'weak lane', 'band touches region edge', 'only one cleavage product found'];
+  const WARN = ['parent saturated', 'product saturated', 'weak lane', 'band cut by the box edge', 'band at the top of the box: a well?',
+    'unassigned band inside the measured range', 'band above the parent', 'extra band not matching the cleavage products',
+    'check band assignment', 'only one cleavage product found'];
   function isWarn(f) { return WARN.includes(f) || /invalid|second product visible/.test(f); }
   const MAX_PIXELS = 40e6;
 
@@ -167,12 +169,13 @@
     loadToken++;
     const s = SAMPLE.generate(7);
     setImage(T.makeImage(s.gray, s.w, s.h), s.name, s.rows);
-    setMessage('Synthetic gel with known values. Row 1 lane 10 is overloaded on purpose (saturated parent), row 2 lane 7 is underloaded.');
+    setMessage('Synthetic gel with known values. Lane 10 is overloaded on purpose (saturated parent) and lane 19 is underloaded.');
   }
 
   function setImage(img, name, regions) {
     state.img = img;
     state.name = name;
+    state.drag = null;
     state.params.polarity = T.detectPolarity(img);
     state.sig = null;
     state.rows = [];
@@ -392,7 +395,7 @@
       chip.className = 'row-chip';
       const t = document.createElement('span');
       t.textContent = 'Row ' + (ri + 1) + ' · ' + row.lanes.length + ' lanes';
-      const re = button('Detect lanes', () => redetect(ri), 'Find the lanes in this row again. Moved or added lanes and band boundaries are reset; roles and labels are kept.');
+      const re = button('Detect lanes', () => redetect(ri), 'Find the lanes in this row again. Moved or added lanes and band boundaries are reset; labels are kept.');
       const rm = button('Remove', () => removeRow(ri), 'Remove this row');
       chip.append(t, re, rm);
       els.rowsBar.appendChild(chip);
@@ -600,7 +603,9 @@
   }
 
   function shortFlag(f) {
-    return ({ 'parent saturated': 'saturated', 'weak lane': 'weak', 'band touches region edge': 'edge', 'no cleavage products found': 'no products',
+    return ({ 'parent saturated': 'saturated', 'product saturated': 'product saturated', 'weak lane': 'weak', 'band cut by the box edge': 'edge',
+      'band at the top of the box: a well?': 'well?', 'unassigned band inside the measured range': 'unassigned band', 'band above the parent': 'band above',
+      'extra band not matching the cleavage products': 'extra band', 'check band assignment': 'check bands', 'no cleavage products found': 'no products',
       'manual band boundaries': 'edited', 'only one cleavage product found': 'one product', 'second product visible: set two products': 'second product?',
       'cleavage product brighter than parent': 'brighter product' })[f] ||
       f.replace('product ', 'P').replace(' not detected', ' missing').replace(/fraction cleaved > 0.5.*/, 'f > 0.5');
@@ -732,7 +737,7 @@
     e.preventDefault();
     els.prof.setPointerCapture(e.pointerId);
     // The boundaries become manual only once a handle actually moves.
-    state.drag = { kind: 'valley', k: best, ri: s.ri, li: s.li, start: r.valleys.map(v => v + r.y0) };
+    state.drag = { kind: 'valley', k: best, rowId: state.rows[s.ri].id, laneId: laneAt(s.ri, s.li).id, start: r.valleys.map(v => v + r.y0) };
     recompute();
   });
 
@@ -747,7 +752,11 @@
       els.prof.style.cursor = near ? 'ew-resize' : 'default';
       return;
     }
-    const lane = laneAt(d.ri, d.li), v = (lane.valleys || d.start).map(y => y - r.y0);
+    // Resolve the dragged lane by id: keyboard moves can reorder lanes during the drag.
+    const ri = state.rows.findIndex(row => row.id === d.rowId);
+    const li = ri < 0 ? -1 : state.rows[ri].lanes.findIndex(l => l.id === d.laneId);
+    if (li < 0 || ri !== s.ri || li !== s.li) { state.drag = null; return; }
+    const lane = laneAt(ri, li), v = (lane.valleys || d.start).map(y => y - r.y0);
     const lo = d.k === 0 ? 0 : v[d.k - 1] + 1, hi = d.k === v.length - 1 ? S.n - 1 : v[d.k + 1] - 1;
     const to = clamp(S.I(mx), lo, hi);
     if (!lane.valleys && to === v[d.k]) return;   // pointer jitter on the handle is not an edit
@@ -902,7 +911,7 @@
       const cx = (r.a + r.b) / 2;
       x.font = `600 ${14 * u}px "Barlow Condensed", sans-serif`;
       x.textBaseline = 'bottom';
-      label(labs[ri][li], cx, row.y0 - 4 * u, ink);
+      label(labs[ri][li], cx, Math.max(16 * u, row.y0 - 4 * u), ink);
       if (r.role === 'marker') return;
       x.textBaseline = 'top';
       x.font = `600 ${15 * u}px "Barlow Condensed", sans-serif`;

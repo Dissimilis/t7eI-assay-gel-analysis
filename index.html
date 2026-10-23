@@ -33,7 +33,7 @@
       <div class="sec-head">
         <span class="sec-num">01</span>
         <h3>Image</h3>
-        <span class="sec-hint" title="Keys: ← → move the selected lane, [ ] previous or next lane, Delete removes it">Drag a box over each row of bands · drag lanes to move · double-click adds a lane</span>
+        <span class="sec-hint" title="Keys: ← → move the selected lane, [ ] previous or next lane, Delete removes it">Drag a box over each row of bands, leaving the wells out · drag lanes to move · double-click adds a lane</span>
       </div>
       <div class="blueprint frame" id="dropZone">
         <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
@@ -146,11 +146,11 @@
       </div>
       <div>
         <h5>Measurement</h5>
-        <p>Each lane is a vertical strip (default half the lane pitch). Its mean profile is smoothed, the parent band is the uppermost strong peak (above about 37% editing a cleavage product is brighter than the parent), and the cleavage products are found at offsets shared by the lanes of the row, measured from each lane's own parent band, so tilted rows work. Areas are summed above a straight baseline between the valleys around each band, the way ImageJ Gel Analyzer is used by hand.</p>
+        <p>Each lane is a vertical strip (default half the lane pitch). Its mean profile is smoothed, the parent band is the uppermost strong peak (above about 37% editing a cleavage product is brighter than the parent), and the cleavage products are found at offsets shared by the lanes of the row, measured from each lane's own parent band, so tilted rows work. Areas are summed above a baseline: by default a straight line between the valleys around each band, the way ImageJ Gel Analyzer is used by hand.</p>
       </div>
       <div>
         <h5>Checks</h5>
-        <p>Clipped (saturated) parent bands, faint or missing products, weak lanes and bands cut by the region edge are flagged. A clipped parent makes % editing read too high. JPEG files from imagers are often contrast-stretched; a raw 16-bit TIFF gives more reliable numbers. Everything runs in this browser: images never leave the computer.</p>
+        <p>Clipped (saturated) bands, faint, missing or lone products, weak lanes, bands cut by the box edge, wells and extra bands are flagged. A clipped parent makes % editing read too high. JPEG files from imagers are often contrast-stretched; a raw 16-bit TIFF gives more reliable numbers. Everything runs in this browser: images never leave the computer.</p>
       </div>
     </div>
     <p class="foot"><a href="https://github.com/Dissimilis/t7eY-assay-gel-analysis">Source, documentation and validation on GitHub</a></p>

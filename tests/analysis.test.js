@@ -194,3 +194,73 @@ test('low editing next to a strong parent: the faint lower product is still foun
     assert.ok(Math.abs(l.editing - ed) < 0.5, `lane ${i}: ${l.editing} vs ${ed}`);
   });
 });
+
+// Release scenarios from the final reviews: a wrong number must never be silent.
+const WARNING = /saturated|cut by|top of the box|unassigned|above the parent|extra band|check band|only one|second product/;
+
+function bandGel(lanes, opts) {
+  const o = Object.assign({ w: 900, h: 170, amp: 80 }, opts);
+  const g = new Float32Array(o.w * o.h).fill(200);
+  lanes.forEach(({ x, bands }) => {
+    for (let xx = x - 17; xx <= x + 17; xx++) for (let y = 0; y < o.h; y++) {
+      let v = 0;
+      bands.forEach(([yc, m]) => { v += o.amp * m * Math.exp(-((y - yc) ** 2) / 32); });
+      g[y * o.w + xx] -= v;
+    }
+  });
+  return T.makeImage(g, o.w, o.h);
+}
+
+function t7Bands(ed, extra) {
+  const p = ed / 100, fc = 1 - (1 - p) ** 2;
+  return [[30, 1 - fc], [60, fc * 2 / 3], [95, fc / 3]].concat(extra || []);
+}
+
+function assertNotSilent(row, truths, label) {
+  row.lanes.forEach((l, i) => {
+    if (truths[i] == null) return;
+    const ok = l.role === 'sample' && Math.abs(l.editing - truths[i]) <= 2;
+    const warned = l.flags.some(f => WARNING.test(f)) || l.role !== 'sample';
+    assert.ok(ok || warned, `${label} lane ${i}: ${l.editing.toFixed(1)} vs ${truths[i]}, role ${l.role}, flags [${l.flags.join('; ')}]`);
+  });
+}
+
+const fourLanes = (ed, extra) => [60, 160, 260, 360].map((x, i) => ({ x, bands: t7Bands(Array.isArray(ed) ? ed[i] : ed, extra) }));
+
+test('wells inside the box are flagged, not reported as editing', () => {
+  for (const m of [1, 0.4]) {
+    const row = analyseBox(bandGel(fourLanes([0, 10, 20, 30], [[12, m]]), { w: 500 }), { x0: 0, x1: 500, y0: 5, y1: 135 });
+    assert.ok(row.lanes.some(l => l.role === 'sample'), 'not every lane is a ladder');
+    assertNotSilent(row, [0, 10, 20, 30], 'well mass ' + m);
+  }
+});
+
+test('a shared extra band below or between the products is flagged', () => {
+  const below = analyseBox(bandGel(fourLanes(20, [[130, 0.2]]), { w: 500 }), { x0: 0, x1: 500, y0: 5, y1: 160 });
+  assertNotSilent(below, [20, 20, 20, 20], 'band below');
+  const lanes = [60, 160, 260, 360, 460, 560, 660, 760].map(x => ({ x, bands: t7Bands(20, [[78, 0.4]]) }));
+  const between = analyseBox(bandGel(lanes), { x0: 0, x1: 900, y0: 5, y1: 135 });
+  assertNotSilent(between, lanes.map(() => 20), 'dimer between');
+});
+
+test('bands cut by the box edge are flagged', () => {
+  const img = bandGel(fourLanes(25), { w: 500 });
+  assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0: 25, y1: 140 }), [25, 25, 25, 25], 'top cut');
+  assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0: 5, y1: 100 }), [25, 25, 25, 25], 'bottom cut');
+});
+
+test('very high editing (70-80%) is not reported as about 18% without a warning', () => {
+  const row = analyseBox(bandGel(fourLanes([70, 75, 80, 70]), { w: 500 }), { x0: 0, x1: 500, y0: 5, y1: 135 });
+  assertNotSilent(row, [70, 75, 80, 70], 'high editing');
+});
+
+test('One-product mode with a faint parent above is flagged', () => {
+  const p = 0.6, fc = 1 - (1 - p) ** 2;
+  const lanes = [60, 160, 260, 360].map(x => ({ x, bands: [[30, 1 - fc], [75, fc]] }));
+  const img = bandGel(lanes, { w: 500 });
+  const sig = T.signalImage(img, 'dark');
+  const box = { x0: 0, x1: 500, y0: 5, y1: 135 };
+  const d = T.detectLanes(sig, img, box);
+  const row = T.analyze(img, [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null })) })], { polarity: 'dark', products: 1 }).rows[0];
+  assertNotSilent(row, [60, 60, 60, 60], 'one product');
+});

@@ -387,6 +387,12 @@
       q.ladderLike = !lane.role && strongPeaks(ps, P, n).length >= 4;
       return q;
     });
+    const autoPre = pre.filter(q => !q.lane.role);
+    const ladderLike = autoPre.filter(q => q.ladderLike);
+    if (autoPre.length >= 3 && ladderLike.length > autoPre.length / 2) {
+      // Most lanes cannot be ladders: they share an extra band (a well or a second PCR product).
+      ladderLike.forEach(q => { q.ladderLike = false; q.extraBand = true; });
+    }
     const usable = pre.filter(q => q.lane.role !== 'marker' && q.lane.role !== 'excluded' && !q.ladderLike);
     let offsets = null;
     if (usable.length >= 3) {
@@ -404,6 +410,9 @@
       }
     }
     if (offsets && offsets.length) {
+      // A further band position shared by half the lanes means one of the bands is not a cleavage product.
+      const all = consensusOffsets(usable.map(q => q.cands), 8, Math.max(3, Math.ceil(usable.length / 2)));
+      if (all.some(o => !offsets.some(e => Math.abs(e - o) <= 3 + 0.15 * Math.max(e, o)))) usable.forEach(q => { q.extraBand = true; });
       // The true parent is the band from which the products sit at the shared offsets. This finds a
       // faint parent above about 65% editing and passes over a well or stray band above it.
       pre.forEach(q => {
@@ -427,7 +436,7 @@
       // Rare in a real row; usually the box includes wells or a band above the parents.
       brighter.forEach(l => l.flags.push('check band assignment'));
     }
-    return { region: r, pitch, half, offsets: offsets || [], shared: !!offsets, lanes };
+    return { region: r, pitch, half, offsets: offsets || [], shared: !!(offsets && offsets.length), lanes };
   }
 
   /** Parent candidate whose product offsets match the most bands; ties keep the first-pass choice. */
@@ -448,7 +457,11 @@
       return s;
     }, 0);
     let best = q.P, bestScore = score(q.P);
-    for (const c of cands) { const sc = score(c); if (sc > bestScore) { best = c; bestScore = sc; } }
+    for (const c of cands) {
+      const sc = score(c);
+      // Equal support: the upper band is the parent (a faint parent above about 65% editing).
+      if (sc > bestScore || (sc === bestScore && sc > 0 && c < best)) { best = c; bestScore = sc; }
+    }
     return best;
   }
 
@@ -552,7 +565,24 @@
     if (ps[argmax(ps, 0, n - 1)] - minOf(ps) < Math.max(8 * noise, 10)) flags.push('weak lane');
 
     // Automatic role: a ladder has strong bands that match neither the parent nor the products.
-    if (P <= 1 || P >= n - 2) flags.push('band touches region edge');
+    {
+      const lo = minOf(ps), hP = ps[P] - lo, last = valleys[valleys.length - 1], reach = Math.max(10, Math.round(n / 4));
+      const lastHeight = Math.max(heights[heights.length - 1], noise);
+      if (P <= 1 || (valleys[0] <= 1 && ps[0] - lo > 0.2 * hP) || (last >= n - 2 && ps[n - 1] - lo > 0.5 * lastHeight + 3 * noise)) {
+        flags.push('band cut by the box edge');
+      } else if (P <= Math.max(3, 0.06 * n)) {
+        flags.push('band at the top of the box: a well?');
+      }
+      const isPeak = j => peaks.some(y => Math.abs(y - j) <= 4);
+      for (let j = valleys[0] + 1; j < last; j++) {
+        if (!isPeak(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.04 * hP)) { flags.push('unassigned band inside the measured range'); break; }
+      }
+      const ref = prominence(ps, argmax(ps, 0, n - 1), reach);
+      for (let j = 1; j < P - 4; j++) {
+        if (isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.05 * ref)) { flags.push('band above the parent'); break; }
+      }
+      if (q.extraBand) flags.push('extra band not matching the cleavage products');
+    }
     let role = q.lane.role;
     if (!role && q.ladderLike) role = 'marker';
     if (!role) {
@@ -596,6 +626,7 @@
     }));
     const ncFc = nc.length ? nc.reduce((s, v) => s + v, 0) / nc.length : 0;
     out.forEach(r => r.lanes.forEach(l => {
+      l.flags = Array.from(new Set(l.flags));
       if (l.role === 'marker' || l.role === 'excluded') { l.editing = NaN; l.flags = []; return; }
       l.fcCorrected = prm.subtractNC && l.role === 'sample' ? Math.max(0, l.fc - ncFc) : l.fc;
       l.editing = editing(l.fcCorrected, prm.formula);
