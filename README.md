@@ -11,7 +11,7 @@ Densitometry for T7 endonuclease I (T7E1) mismatch-cleavage assays. Load a photo
 1. Open the app and press **Load image**, or drop a PNG, JPEG or TIFF onto the image area. Pasting from the clipboard works too.
 2. Drag a box over one row of bands. Include the parent band and both cleavage products, and leave the wells out. The app finds the loaded lanes, recognises the ladder and skips empty wells. Repeat for every row of the gel.
 3. Check the results table. Set the control lanes to **NC**, exclude lanes you don't need and give lanes your own labels.
-4. Export the numbers as **CSV**, the full record as **JSON**, or an annotated **Figure PNG** with % editing under every lane.
+4. Export the numbers as **CSV**, or an annotated **Figure PNG** with % editing under every lane.
 
 **Sample gel** loads a synthetic gel with known values, so you can try every control without your own data.
 

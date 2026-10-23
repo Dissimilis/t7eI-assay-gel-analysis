@@ -9,7 +9,7 @@
 
   const els = {
     fileName: $('fileName'), fileInput: $('fileInput'), sampleBtn: $('sampleBtn'),
-    csvBtn: $('csvBtn'), pngBtn: $('pngBtn'), jsonBtn: $('jsonBtn'),
+    csvBtn: $('csvBtn'), pngBtn: $('pngBtn'),
     stage: document.querySelector('.stage'), img: $('imgCanvas'), ov: $('ovCanvas'), empty: $('emptyMsg'),
     rowsBar: $('rowsBar'), meta: $('imgMeta'),
     laneWidth: $('laneWidth'), laneWidthVal: $('laneWidthVal'), smoothing: $('smoothing'), smoothingVal: $('smoothingVal'),
@@ -271,7 +271,7 @@
     renderTable();
     renderMeta();
     const has = !!state.result;
-    els.csvBtn.disabled = els.pngBtn.disabled = els.jsonBtn.disabled = !has;
+    els.csvBtn.disabled = els.pngBtn.disabled = !has;
   }
 
   function renderParams() {
@@ -823,28 +823,6 @@
     download(new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' }), baseName() + '-t7e1.csv');
   }
 
-  function exportJson() {
-    if (!state.result) return;
-    const data = {
-      app: 'T7E1 Gel Analysis', version: VERSION, exported: new Date().toISOString(),
-      file: state.name, image: { width: state.img.w, height: state.img.h, bits: state.img.bits },
-      params: state.params, ncMeanFraction: state.result.ncFc,
-      rows: state.rows.map((row, ri) => {
-        const rr = state.result.rows[ri];
-        return {
-          region: { x0: row.x0, y0: row.y0, x1: row.x1, y1: row.y1 }, pitch: rr.pitch, productOffsets: rr.offsets,
-          lanes: rr.lanes.map((r, li) => ({
-            label: labels()[ri][li], role: r.role, roleSource: row.lanes[li].role ? 'manual' : 'auto',
-            x: r.x, strip: [r.a, r.b], bandsY: r.peaks.map(v => v + r.y0), boundariesY: r.valleys.map(v => v + r.y0),
-            manualBoundaries: !!row.lanes[li].valleys, areas: r.areas, fractionCleaved: r.fc, fractionUsed: r.fcCorrected,
-            editingPct: isFinite(r.editing) ? r.editing : null, flags: r.flags
-          }))
-        };
-      })
-    };
-    download(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), baseName() + '-t7e1.json');
-  }
-
   function exportPng() {
     if (!state.result) return;
     const img = state.img, col = colors(), u = Math.max(1, img.w / 900);
@@ -876,7 +854,6 @@
   }
 
   els.csvBtn.addEventListener('click', exportCsv);
-  els.jsonBtn.addEventListener('click', exportJson);
   els.pngBtn.addEventListener('click', exportPng);
 
   // ------------------------------------------------------------ start
