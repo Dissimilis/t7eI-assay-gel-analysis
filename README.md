@@ -10,7 +10,7 @@ Densitometry for T7 endonuclease I (T7E1) mismatch-cleavage assays. Load a photo
 
 1. Open the app and press **Load image**, or drop a PNG, JPEG or TIFF onto the image area. Pasting from the clipboard works too.
 2. Drag a box over one row of bands. Include the parent band and both cleavage products with a little background above and below, and leave the wells out. The app finds the loaded lanes, recognises the ladder and skips empty wells. Repeat for every row of the gel.
-3. Check the results table and the lane profile. If a lane picked the wrong band, **click the peak on the profile**: a small menu lets you remove that band (its area is then left out and it is never taken as a product) or use it as the parent, product 1 or product 2. **Reset bands** undoes this for the lane. Remove lanes you don't need (**Remove lane** or Delete) and give lanes your own labels. Every setting has an ⓘ button that explains what it does.
+3. Check the results table and the lane profile. If a lane picked the wrong band, **click the peak on the profile**: a small menu lets you remove that band (its area is then left out and it is never taken as a product) or use it as the parent, product 1 or product 2. **Edit bands** lists every band of the lane with its role, for keyboard and touch use. **Undo** steps back one band change; **Reset bands** clears all band changes of the lane. Remove lanes you don't need (**Remove lane** or Delete) and give lanes your own labels. Every setting has an ⓘ button that explains what it does.
 4. Export the numbers as an **Excel workbook** (results plus a sheet with the settings used), as **CSV**, or as an annotated **Figure PNG** with % editing under every lane.
 
 **Sample gel** loads a synthetic gel with known values, so you can try every control without your own data.
@@ -32,10 +32,10 @@ The pipeline for each row:
 
 - **Lanes.** The lane pitch comes from the autocorrelation of the row's column profile. Lane centres are the half-maximum midpoints of the peaks above a rolling-ball background. Empty wells produce no peak and are skipped.
 - **Profiles.** Each lane is a vertical strip, half the lane pitch wide by default. Its mean signal per pixel row is smoothed with a Gaussian (σ 1.5 px).
-- **Bands.** The parent band is the uppermost strong peak; above about 37% editing the larger cleavage product is brighter than the parent, so the strongest peak is not always the parent. In rows with three or more sample lanes, the cleavage products are located at offsets shared by the lanes, measured from each lane's own parent band. Rows can mix amplicons: lanes whose two strongest lower bands agree form a group, each group of two or more lanes gives a product pattern, and every interior lane takes the pattern and parent that explain its bands best (the first and last lane keep the row's main pattern, as ladders sit there). A product only has to stand three times above the profile noise, so faint products next to a strong parent are found. Tilted rows and slight smiling therefore work, and a faint product is still found where its brighter neighbours put it. In smaller rows each lane uses its own strongest products (two, or one in *One* mode).
+- **Bands.** The parent band is the uppermost strong peak; above about 37% editing the larger cleavage product is brighter than the parent, so the strongest peak is not always the parent. In rows with three or more sample lanes, the cleavage products are located at offsets shared by the lanes, measured from each lane's own parent band. Rows can mix amplicons: lanes whose two strongest lower bands agree form a group, each group of two or more lanes gives a product pattern, and every lane takes the pattern and parent that explain its bands best. Above about 65% editing the parent can be fainter than the cut used to find it; when the row then finds too few products and most lanes show a faint band above, the products are located again from that band. A product only has to stand three times above the profile noise, so faint products next to a strong parent are found. Tilted rows and slight smiling therefore work, and a faint product is still found where its brighter neighbours put it. In smaller rows each lane uses its own strongest products (two, or one in *One* mode).
 - **Background.** By default a straight line joins the valleys on either side of each band (*Valley*), which is how ImageJ Gel Analyzer is used by hand. *Envelope* draws one line under the whole lane. *Blend* starts from the valley line and moves it towards the envelope where smear lifts the valleys between bands.
-- **Areas.** Each band's area is the profile summed above the baseline between its two boundaries. You can drag the boundary markers on the profile plot; the lane is then marked *edited*. A band removed by hand is modelled as a Gaussian peak and subtracted before its neighbours are measured, so its tails do not lift their baselines.
-- **Ladders.** Ladders sit at the ends of a row, so only the first or last lane is marked as a marker: when it has four or more strong bands, or strong bands that match neither the parent nor the product positions. An interior lane like that is measured as a sample, with an extra-band warning or with product positions of its own. Markers take no part in finding the product positions and are not quantified.
+- **Areas.** Each band's area is the profile summed above the baseline between its two boundaries. You can drag the boundary markers on the profile plot; the lane is then marked *edited*. A band removed by hand next to the measured bands (above the parent, between the products or just below the last one) is modelled as a Gaussian peak and subtracted before its neighbours are measured, so its tails do not lift their baselines. A removal only changes its own lane.
+- **Ladders.** Ladders sit at the ends of a row, so only the first or last lane is marked as a marker: when it has four or more strong bands, or strong bands that match neither the parent nor the product positions. An interior lane like that, or an end lane whose bands fit one of the row's product patterns, is measured as a sample, with a warning or with product positions of its own. Markers take no part in finding the product positions and are not quantified.
 
 ### Parameters
 
@@ -47,7 +47,7 @@ The pipeline for each row:
 | Lane width | 50% of pitch | 20–90% |
 | Smoothing | σ 1.5 px | 0–4 px |
 
-Settings are remembered in the browser. **Reset defaults** restores them. Changing the number of cleavage products resets hand-moved band boundaries.
+Settings are remembered in the browser. **Reset defaults** restores them. Changing the number of cleavage products resets hand-moved band boundaries and band choices, and clears Undo.
 
 Keyboard: with a lane selected, ← and → move it (Shift for 5 px), [ and ] select the previous or next lane, and Delete removes it. **Load image** and every control are reachable with Tab; drawing a row and moving band boundaries need a pointer.
 
@@ -65,7 +65,7 @@ Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit c
 | no cleavage, no products | No cleavage product in the lane, or none anywhere in the row. |
 | brighter product | Expected above about 37% editing; listed so the band assignment can be checked. |
 | product saturated | A cleavage product is clipped too. The value is unreliable in either direction. |
-| extra band | A band that matches neither the parent nor the products appears in most lanes, for example a primer dimer. It is not counted. |
+| extra band | A band that matches neither the parent nor the products appears in most lanes, for example a primer dimer. Its signal may be counted with a neighbouring band: remove it with the band menu. |
 | check bands | In most lanes of the row a product looks brighter than the parent. That happens above about 37% editing, but more often the box includes the wells or a band above the parents. |
 | weak | The lane's strongest band is barely above background. |
 | edge | A band is cut by the box edge, so part of it is missing and the baseline is lifted. Draw the box a little larger. |

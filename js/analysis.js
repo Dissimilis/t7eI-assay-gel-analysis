@@ -418,8 +418,17 @@
       for (let i = 0; i < n; i++) if (!near(i) && (top < 0 || ps[i] > ps[top])) top = i;
       if (top < 0) top = argmax(ps, 0, n - 1);
       const P = ov.parent != null ? ov.parent : parentIndex(ps, top, n, noise, near);
-      const q = { lane, p, ps, a, b, P, noise, ov, parentFixed: ov.parent != null, isEnd: false,
+      const q = { lane, p, ps, a, b, P, noise, ov, parentFixed: ov.parent != null, isEnd: false, products: prm.products,
         cands: productCandidates(ps, P, noise).filter(c => !near(P + c.off)) };
+      // The row votes with each lane's automatic bands, so a band removed in one lane does not move the others.
+      const autoTop = argmax(ps, 0, n - 1), autoP = parentIndex(ps, autoTop, n, noise);
+      q.voteCands = productCandidates(ps, autoP, noise);
+      // The uppermost faint band below the well zone: the parent when editing is high enough that it
+      // falls under the cut parentIndex uses (about 65% and above).
+      const reach = Math.max(10, Math.round(n / 4)), ref = prominence(ps, autoTop, reach), well = Math.max(3, 0.08 * n);
+      for (let j = Math.ceil(well); j < autoP - 4; j++) {
+        if (isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.05 * ref)) { q.faintCands = productCandidates(ps, j, noise); break; }
+      }
       // A ladder has more strong bands than parent plus two products; keep it out of the vote.
       q.ladderLike = !lane.role && strongPeaks(ps, P, n).length >= 4;
       return q;
@@ -434,17 +443,23 @@
     const usable = pre.filter(q => q.lane.role !== 'marker' && q.lane.role !== 'excluded' && !q.ladderLike);
     let offsets = null;
     if (usable.length >= 3) {
-      offsets = consensusOffsets(usable.map(q => q.cands), prm.products);
+      offsets = consensusOffsets(usable.map(q => q.voteCands), prm.products);
+      const faint = usable.filter(q => q.faintCands);
+      if (offsets.length < prm.products && faint.length > usable.length / 2) {
+        // Too few shared products and a faint band above most parents: vote again from that band.
+        const alt = consensusOffsets(faint.map(q => q.faintCands), prm.products, Math.ceil(usable.length / 2));
+        if (alt.length === prm.products) offsets = alt;
+      }
       if (offsets.length < prm.products) {
         // Keep the agreed positions and add the next most common ones, seen in at least two lanes.
-        const lists = usable.map(q => q.cands);
+        const lists = usable.map(q => q.voteCands);
         const extra = consensusOffsets(lists, 8, 2).filter(o => !offsets.some(e => Math.abs(e - o) <= 3 + 0.15 * Math.max(e, o)));
         offsets = offsets.concat(extra).slice(0, prm.products).sort((a, b) => a - b);
       }
       if (!offsets.length) {
         // Nothing shared at all: use the strongest candidates of the most cleaved-looking lane.
-        const best = usable.slice().sort((a, b) => sumProm(b.cands) - sumProm(a.cands))[0];
-        offsets = ownOffsets(best, prm.products);
+        const best = usable.slice().sort((a, b) => sumProm(b.voteCands) - sumProm(a.voteCands))[0];
+        offsets = best.voteCands.slice().sort((a, b) => b.prom - a.prom).slice(0, prm.products).map(c => c.off).sort((a, b) => a - b);
       }
     }
     const tolOf = o => 3 + 0.15 * o;
@@ -456,7 +471,7 @@
       const groups = [];
       usable.forEach(q => {
         const h = q.ps[q.P] - minOf(q.ps);
-        const own = q.cands.filter(c => c.prom >= 0.05 * h).sort((a, b) => b.prom - a.prom).slice(0, prm.products).map(c => c.off).sort((a, b) => a - b);
+        const own = q.voteCands.filter(c => c.prom >= 0.05 * h).sort((a, b) => b.prom - a.prom).slice(0, prm.products).map(c => c.off).sort((a, b) => a - b);
         if (own.length < prm.products) return;
         const g = groups.find(x => samePattern(x.ref, own));
         if (g) g.items.push(own); else groups.push({ ref: own, items: [own] });
@@ -468,16 +483,17 @@
     }
     if (patterns.length) {
       // A further band position shared by half the lanes, not part of any pattern, is not a cleavage product.
-      const all = consensusOffsets(usable.map(q => q.cands), 8, Math.max(3, Math.ceil(usable.length / 2)));
+      const all = consensusOffsets(usable.map(q => q.voteCands), 8, Math.max(3, Math.ceil(usable.length / 2)));
       if (all.some(o => !patterns.some(pat => pat.some(e => Math.abs(e - o) <= tolOf(Math.max(e, o)))))) usable.forEach(q => { q.extraBand = true; });
       // Each lane takes the pattern and parent that explain its bands best. The parent is the band from
       // which the products sit at the pattern's offsets: this finds a faint parent above about 65%
       // editing and passes over a well or stray band above it. Ladders sit at the ends of a row, so
       // end lanes keep the row consensus.
-      pre.forEach((q, i) => {
+      pre.forEach(q => {
         if (q.lane.role === 'marker' || q.lane.role === 'excluded' || q.ladderLike) return;
-        const choices = (i === 0 || i === pre.length - 1) && pre.length >= 3 ? patterns.slice(0, 1) : patterns;
         let best = null;
+        const own = q.ov.removed.length ? q.cands.slice().sort((a, b) => b.prom - a.prom).slice(0, prm.products).map(c => c.off).sort((a, b) => a - b) : [];
+        const choices = own.length === prm.products ? patterns.concat([own]) : patterns;
         choices.forEach((pat, k) => {
           const fit = bestParent(q, pat, n);
           if (!best || betterFit(fit.fit, best.fit)) best = { k, pat, P: fit.P, fit: fit.fit };
@@ -488,6 +504,8 @@
           q.cands = productCandidates(q.ps, best.P, q.noise).filter(c => !near(best.P + c.off));
         }
         q.patternK = best.k;
+        // A lane whose bands a shared pattern explains completely is a sample, even at the end of a row.
+        q.fitsPattern = best.fit.hits === best.pat.length && best.fit.left === 0;
         if (best.k > 0) q.ownOffsets = best.pat;
       });
       const uses = patterns.map((_, k) => pre.filter(q => q.patternK === k).length);
@@ -516,9 +534,15 @@
     return { region: r, pitch, half, offsets: offsets || [], shared: !!(offsets && offsets.length), lanes };
   }
 
-  /** Fit comparison: more products found; then fewer unexplained strong bands; then a closer fit. */
+  /**
+   * Fit comparison: more products found; then fewer strong bands left unexplained; then, when the
+   * pattern is complete, a closer fit. Remaining ties go to the upper band (see bestParent).
+   */
   function betterFit(a, b) {
-    return a.hits > b.hits || (a.hits === b.hits && a.hits > 0 && (a.left < b.left || (a.left === b.left && a.dev < b.dev - 1)));
+    if (a.hits !== b.hits) return a.hits > b.hits;
+    if (a.hits === 0) return false;
+    if (a.left !== b.left) return a.left < b.left;
+    return a.complete && a.dev < b.dev - 1;
   }
 
   /** Parent candidate whose product offsets match the most bands; ties keep the first-pass choice. */
@@ -534,18 +558,21 @@
     }
     // Score: products found at the shared offsets; then fewer strong bands below the parent left
     // unexplained (a well or smear taken as parent leaves the real product 2 over); then a closer fit.
-    const strongBelow = [];
-    for (let j = 1; j < n - 1; j++) if (isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.15 * ref)) strongBelow.push(j);
+    const strong = [];
+    for (let j = 1; j < n - 1; j++) if (!removed(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.15 * ref)) strong.push(j);
+    const well = Math.max(3, 0.08 * n);   // smear from a well at the top of the box does not count against a parent
     const score = P => {
       const acc = offsets.reduce((a, off) => {
         const tol = 3 + 0.15 * off;
         let dev = Infinity;
         for (let j = Math.max(1, Math.round(P + off - tol)); j <= Math.min(n - 2, Math.round(P + off + tol)); j++) {
-          if (isLocalMax(ps, j) && prominence(ps, j, reach) >= 3 * noise) dev = Math.min(dev, Math.abs(j - P - off));
+          if (!removed(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= 3 * noise) dev = Math.min(dev, Math.abs(j - P - off));
         }
         return isFinite(dev) ? { hits: a.hits + 1, dev: a.dev + dev } : a;
       }, { hits: 0, dev: 0 });
-      acc.left = strongBelow.filter(j => j > P + 4 && !offsets.some(off => Math.abs(j - P - off) <= 3 + 0.15 * off)).length;
+      // Strong bands the choice leaves unexplained: below the parent and off the pattern, or above it.
+      acc.left = strong.filter(j => (j > P + 4 && !offsets.some(off => Math.abs(j - P - off) <= 3 + 0.15 * off)) || (j < P - 4 && j >= well)).length;
+      acc.complete = offsets.length >= (q.products || 2);
       return acc;
     };
     let best = q.parentFixed ? q.P : q.P, bestScore = score(q.P);
@@ -780,7 +807,7 @@
       const matches = j => Math.abs(j - P) <= 4 || offsets.some(off => Math.abs(j - P - off) <= 3 + 0.15 * off) ||
         (prm.products === 1 && offsets.length === 1 && j - P > offsets[0]);   // the second product, not a ladder band
       // Ladders sit at the ends of a row: interior lanes are samples unless ladder-like.
-      for (let j = 1; (q.isEnd || q.rowLanes < 3) && j < n - 1; j++) {
+      for (let j = 1; (q.isEnd || q.rowLanes < 3) && !q.fitsPattern && j < n - 1; j++) {
         if (!isLocalMax(ps, j) || matches(j)) continue;
         if (prominence(ps, j, Math.max(10, Math.round(n / 4))) >= 0.25 * parentProm) { role = 'marker'; break; }
       }

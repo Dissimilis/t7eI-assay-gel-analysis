@@ -252,9 +252,9 @@ test('bands cut by the box edge are flagged', () => {
   for (const [y0, y1] of [[11, 103], [21, 116], [20, 104]]) assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0, y1 }), [25, 25, 25, 25], `box ${y0}-${y1}`);
 });
 
-test('very high editing (70-80%) is not reported as about 18% without a warning', () => {
+test('very high editing (70-80%) finds the faint parent above the products', () => {
   const row = analyseBox(bandGel(fourLanes([70, 75, 80, 70]), { w: 500 }), { x0: 0, x1: 500, y0: 5, y1: 135 });
-  assertNotSilent(row, [70, 75, 80, 70], 'high editing');
+  [70, 75, 80, 70].forEach((ed, i) => assert.ok(Math.abs(row.lanes[i].editing - ed) <= 2, `lane ${i}: ${row.lanes[i].editing} vs ${ed}`));
 });
 
 test('One-product mode with a faint parent above is flagged', () => {
@@ -367,4 +367,34 @@ test('using the automatic product 1 as product 2 does not give one band two role
     assert.equal(new Set(ys.map(y => Math.round(y / 4))).size, ys.length, `lane ${i}: distinct bands ${ys}`);
   });
   assertNotSilent(res, [20, 20, 20, 20], 'swapped product');
+});
+
+test('the last lane of a second amplicon is measured with its own pattern', () => {
+  const A = t7Bands(15).map(([y, m]) => [y + 10, m]);   // 40, 70, 105
+  const p = 0.4, fc = 1 - (1 - p) ** 2, B = [[40, 1 - fc], [90, fc * 2 / 3], [140, fc / 3]];
+  const lanes = ['A', 'A', 'A', 'A', 'B', 'B'].map((k, i) => ({ x: 60 + i * 100, bands: k === 'A' ? A : B }));
+  const row = analyseBox(bandGel(lanes, { w: 650, h: 175 }), { x0: 0, x1: 650, y0: 5, y1: 165 });
+  [4, 5].forEach(i => {
+    assert.equal(row.lanes[i].role, 'sample', 'lane ' + i);
+    assert.ok(Math.abs(row.lanes[i].editing - 40) <= 2, `lane ${i}: ${row.lanes[i].editing}`);
+  });
+});
+
+test('an extra band below the products in one lane does not move its parent', () => {
+  const lanes = [60, 160, 260, 360, 460].map((x, i) => ({ x, bands: t7Bands(20, i === 2 ? [[125, 0.35]] : []) }));
+  const row = analyseBox(bandGel(lanes, { w: 560 }), { x0: 0, x1: 560, y0: 5, y1: 160 });
+  const l = row.lanes[2];
+  assert.equal(l.peaks[0] + l.y0, 30, 'parent of lane 2');
+  assertNotSilent(row, [20, 20, 20, 20, 20], 'one extra band');
+});
+
+test('One-product mode measures the end lanes too', () => {
+  const lanes = [60, 160, 260, 360].map(x => ({ x, bands: [[30, 0.5625], [70, 0.2917], [115, 0.1458]] }));
+  const img = bandGel(lanes, { w: 500 });
+  const sig = T.signalImage(img, 'dark');
+  const box = { x0: 0, x1: 500, y0: 5, y1: 160 };
+  const d = T.detectLanes(sig, img, box);
+  const row = T.analyze(img, [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null })) })], { polarity: 'dark', products: 1 }).rows[0];
+  row.lanes.forEach((l, i) => assert.equal(l.role, 'sample', 'lane ' + i));
+  assertNotSilent(row, [25, 25, 25, 25], 'one product');
 });

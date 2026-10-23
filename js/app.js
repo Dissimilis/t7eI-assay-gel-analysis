@@ -838,7 +838,8 @@
       saveParams();
       if (key === 'polarity' && state.img) state.rows.forEach(row => redetectRow(row, false));
       // Manual boundaries are tied to the number of bands, so a new product count resets them.
-      if (key === 'products') state.rows.forEach(row => row.lanes.forEach(l => { if (l.valleys) { saveUndo(l); l.valleys = null; } }));
+      // Band choices and boundaries depend on the number of bands: a new product count starts them afresh.
+      if (key === 'products') state.rows.forEach(row => row.lanes.forEach(l => { l.valleys = null; l.bands = null; l.undo = []; }));
       recompute();
     });
   });
@@ -849,7 +850,7 @@
     const oldPol = state.params.polarity, oldProducts = state.params.products;
     state.params = Object.assign({}, T.DEFAULTS, { polarity: state.img ? T.detectPolarity(state.img) : oldPol });
     if (state.img && state.params.polarity !== oldPol) state.rows.forEach(row => redetectRow(row, false));
-    if (state.params.products !== oldProducts) state.rows.forEach(row => row.lanes.forEach(l => { if (l.valleys) { saveUndo(l); l.valleys = null; } }));
+    if (state.params.products !== oldProducts) state.rows.forEach(row => row.lanes.forEach(l => { l.valleys = null; l.bands = null; l.undo = []; }));
     saveParams();
     recompute();
   });
@@ -1010,6 +1011,7 @@
   els.removeLane.addEventListener('click', removeSelectedLane);
   els.zoomBtn.addEventListener('click', () => {
     state.profZoom = !state.profZoom;
+    closeBandMenu();
     els.zoomBtn.setAttribute('aria-pressed', String(state.profZoom));
     renderLane();
   });

@@ -54,6 +54,9 @@ test('UVP10523: removing the extra band in lane 14 restores the expected product
   const got = l.peaks.map(y => y + l.y0);
   [381, 411, 442].forEach((y, k) => assert.ok(Math.abs(got[k] - y) <= 3, `lane 14: ${got}`));
   assert.ok(l.flags.includes('manual band assignment'));
+  // A band removed in one lane does not change the others.
+  const auto = analyse(img, UVP10523.top.box);
+  res.lanes.forEach((x, i) => { if (i !== 14) assert.deepEqual([x.editing, x.peaks], [auto.lanes[i].editing, auto.lanes[i].peaks], 'lane ' + i); });
 });
 
 test('IM002717: faint products next to clipped parents are found', { skip: !fs.existsSync(ref('gel-IM002717.tif')) }, async () => {
