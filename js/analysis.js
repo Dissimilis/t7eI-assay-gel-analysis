@@ -568,7 +568,10 @@
     {
       const lo = minOf(ps), hP = ps[P] - lo, last = valleys[valleys.length - 1], reach = Math.max(10, Math.round(n / 4));
       const lastHeight = Math.max(heights[heights.length - 1], noise);
-      if (P <= 1 || (valleys[0] <= 1 && ps[0] - lo > 0.2 * hP) || (last >= n - 2 && ps[n - 1] - lo > 0.5 * lastHeight + 3 * noise)) {
+      // A boundary at the end of the profile while the signal is still sloping there means the box cut a band tail.
+      const topCut = valleys[0] <= 1 && n > 4 && ps[3] - ps[0] > 2 * noise && ps[0] - lo > 0.1 * hP + 2 * noise;
+      const bottomCut = last >= n - 2 && n > 4 && ps[n - 4] - ps[n - 1] > 2 * noise && ps[n - 1] - lo > 0.1 * lastHeight + 2 * noise;
+      if (P <= 1 || (valleys[0] <= 1 && ps[0] - lo > 0.2 * hP) || topCut || bottomCut || (last >= n - 2 && ps[n - 1] - lo > 0.5 * lastHeight + 3 * noise)) {
         flags.push('band cut by the box edge');
       } else if (P <= Math.max(3, 0.06 * n)) {
         flags.push('band at the top of the box: a well?');

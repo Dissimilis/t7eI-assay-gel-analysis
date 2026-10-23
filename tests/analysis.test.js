@@ -246,7 +246,8 @@ test('a shared extra band below or between the products is flagged', () => {
 test('bands cut by the box edge are flagged', () => {
   const img = bandGel(fourLanes(25), { w: 500 });
   assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0: 25, y1: 140 }), [25, 25, 25, 25], 'top cut');
-  assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0: 5, y1: 100 }), [25, 25, 25, 25], 'bottom cut');
+  for (const y1 of [100, 102, 103, 105, 110]) assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0: 5, y1 }), [25, 25, 25, 25], 'bottom cut at ' + y1);
+  for (const y0 of [18, 22, 25]) assertNotSilent(analyseBox(img, { x0: 0, x1: 500, y0, y1: 140 }), [25, 25, 25, 25], 'top cut at ' + y0);
 });
 
 test('very high editing (70-80%) is not reported as about 18% without a warning', () => {
