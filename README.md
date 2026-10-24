@@ -92,6 +92,12 @@ The test suite runs the engine on the synthetic gel: two ladders and 24 lanes wh
 
 The engine was also compared with careful hand analysis in ImageJ of a real Invitrogen E-Gel 48 photo with 21 sample lanes. With the default *Valley* background the mean absolute difference was 0.4 points on one row and 1.8 points on the other, and the rank order of lanes was the same. The row with the larger difference has more smear between bands, and the hand analysis counted more of it as band. *Blend* brings the two rows to 0.8 and 0.6 points. The gel itself is not part of this repository; `tests/analysis.test.js` runs that comparison when a local copy is supplied through `T7E1_GEL_PGM`.
 
+### Definition of done for a release
+
+A release is done when a fresh audit passes: `node tests/audit.js` measures one independent random row per seed, from a block of seeds reserved for audits and never used to tune the engine (half full rows, half boxes of one to three lanes; normal and hard gels, one or two products, all three backgrounds). It passes when no lane the image can decide reads more than 10 points off without a warning. A lane is decidable when its parent band peaks at least 2 grey levels and 4 times the pixel noise, or when two lanes of the row keep at least 40% of their DNA uncut. Zero misses in 15,000 results per stratum puts the 95% upper bound on the miss rate at 1 in 5,000 per stratum. The audit also reports coverage, the share of lanes that get a value without a warning, so that warning more cannot pass for being more accurate. A miss found by an audit is fixed against new seeds, and the next release audits the next unused block.
+
+Version 1.7.6, audit of seeds 1,000,001–1,030,000: full rows 0 silent misses (bound 1 in 5,003), 51.7% of lanes unflagged; boxes of one to three lanes 0 silent misses (bound 1 in 4,871), 44.0% unflagged.
+
 `tests/invariants.test.js` checks rules that must hold on any gel, on seeded random synthetic rows (`tests/gels.js`) with all three backgrounds and both product counts:
 
 - **Normal gels** (bands at least six band widths apart, light noise, editing up to 70%): every sample lane reads within 2.5 points of the truth or carries a warning.
