@@ -709,7 +709,7 @@
 
     // Lanes of one product pattern find each product at about the same distance below their parent.
     // When those distances fall into two groups well apart, one group took another band (a primer
-    // dimer, a second product) for the product: the smaller group warns, both when they are equal.
+    // dimer, a second product) for the product, and that group warns.
     const split = ctx ? ctx.split : (() => {
       const out = new Set();
       const groups = new Map();
@@ -726,7 +726,12 @@
           if (cut < 0) continue;
           const lo = at.slice(0, cut), hi = at.slice(cut);
           if (gap <= Math.max(2 * SAME_BAND, offTol(at[cut - 1].off)) || lo.length < 2 || hi.length < 2) continue;
-          (lo.length < hi.length ? lo : hi.length < lo.length ? hi : at).forEach(x => out.add(x.i));
+          // A primer dimer shows in uncut lanes too: the group holding lanes that lack the other
+          // product is the one that took it. Otherwise the smaller group, both when equal.
+          const alone = g => g.filter(x => lanes[x.i].found.slice(1).filter(Boolean).length === 1).length;
+          const pickG = prm.products === 2 && alone(lo) !== alone(hi) ? (alone(lo) > alone(hi) ? lo : hi)
+            : lo.length < hi.length ? lo : hi.length < lo.length ? hi : at;
+          pickG.forEach(x => out.add(x.i));
         }
       }
       return Array.from(out);
@@ -1101,7 +1106,7 @@
       // Without products, any band above the well zone that stands out of the noise may be a faint
       // parent at very high editing: the lane then reads 0% instead of over 80%. A row of one or two
       // lanes has no neighbours to show that parent, so there any band above the noise counts.
-      const few = q.rowLanes <= 3, faintBar = (few ? 1 : 3) * noise;
+      const few = q.rowLanes <= 3, faintBar = (few ? 0.5 : 3) * noise;
       for (let j = 1; j < P - NEAR_BAND && !flags.includes('band above the parent'); j++) {
         if (nearRemoved(j) || !isLocalMax(ps, j)) continue;
         const pr = prominence(ps, j, reach);
