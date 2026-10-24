@@ -210,6 +210,14 @@ test('regressions found in review: these lanes are right or warned', () => {
   assert.ok(auto.lanes.length > 2);
 });
 
+test('a four-lane row with two cut lanes: their shared bands are not a ladder', () => {
+  const g = t7Row(58887, { hard: true, products: 2 });
+  for (const background of ['blend', 'envelope']) {
+    const l = analyseRow(g.img, g.box, null, { products: 2, background }).lanes[1];
+    assert.ok(Math.abs(l.editing - g.truth[1]) <= 10 || l.flags.some(T.isWarning), `${background}: ${l.editing.toFixed(1)} vs ${g.truth[1].toFixed(1)} [${l.flags}]`);
+  }
+});
+
 test('rows of alternately bright and dim lanes: every lane found', () => {
   for (const seed of [167, 2739]) {
     const g = wildRow(seed, { products: 2 }), d = T.detectLanes(T.signalImage(g.img, 'dark'), g.img, g.box);

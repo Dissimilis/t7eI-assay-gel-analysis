@@ -498,7 +498,7 @@
     // Band positions most lanes share (parents, products, a well, a primer dimer) are not a ladder's
     // signature. A ladder has more strong bands than parent plus two products, most of them its own;
     // keep it out of the vote. Judged on the automatic bands, like the vote.
-    const sharedAt = j => pre.length >= 3 && pre.filter(o => o.strong.some(k => Math.abs(k - j) <= SAME_BAND)).length >= Math.max(3, Math.ceil(pre.length / 2));
+    const sharedAt = j => pre.length >= 3 && pre.filter(o => o.strong.some(k => Math.abs(k - j) <= SAME_BAND)).length >= Math.max(2, Math.ceil(pre.length / 2));
     pre.forEach(q => {
       q.sharedAt = sharedAt;
       q.ladderLike = !q.lane.role && q.strong.length >= 4 && q.strong.filter(j => !sharedAt(j)).length >= 3;
