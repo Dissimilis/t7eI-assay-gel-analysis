@@ -663,6 +663,22 @@
       q.offs = offs;
       return l;
     });
+    // Two nearby lanes whose parent sits at a product position of the row, at the same place as this
+    // lane's parent: this parent is in the same doubt.
+    const atProd = ctx ? ctx.atProd : lanes.map((l, i) => (l.flags.includes('parent at a product position of the row') ? pre[i].P : null));
+    lanes.forEach((l, i) => {
+      const q = pre[i];
+      if (l.role !== 'sample' || l.flags.includes('parent at a product position of the row') || l.flags.includes('band above the parent')) return;
+      const same = pre.filter((o, j) => j !== i && atProd[j] != null && Math.abs(o.lane.x - q.lane.x) <= 4.5 * pitch && Math.abs(atProd[j] - q.P) <= SAME_BAND);
+      if (same.length >= 2) l.flags.push('parent at a product position of the row');
+    });
+    // A nearby lane with its parent well above this one and a clear band where this lane has its
+    // parent: this lane's parent is that lane's product, or a band below a faint parent.
+    const below = ctx ? ctx.below : pre.map((q, i) => usable.includes(q) && nearOf(q).some(o => o.P < q.P - 10 && !upper[pre.indexOf(o)].some(u => u < o.P - NEAR_BAND) &&
+      o.cands.some(c => Math.abs(o.P + c.off - q.P) <= SAME_BAND && c.prom >= 0.1 * (o.ps[o.P] - minOf(o.ps)))));
+    lanes.forEach((l, i) => {
+      if (l.role === 'sample' && below[i] && !l.flags.includes('parent at a product position of the row')) l.flags.push('parent at a product position of the row');
+    });
     // One product, yet lanes show a band at a product position of the row with a further band above
     // it, or no product where expected and a band above that place. Two such lanes with the further
     // band at the same position (or one, with a strong band) mean the row cannot tell which band is
@@ -733,7 +749,7 @@
     const brighterRow = ctx ? ctx.brighterRow : samples.length >= 3 && brighter.length > samples.length / 2;
     // Rare in a real row; usually the box includes wells or a band above the parents.
     if (brighterRow) brighter.forEach(l => { if (!l.flags.includes('check band assignment')) l.flags.push('check band assignment'); });
-    const context = { main: pre.main, P: pre.map(q => q.P), brighterRow, upper, lower, nearParents, doubted, split };
+    const context = { main: pre.main, P: pre.map(q => q.P), brighterRow, upper, lower, nearParents, doubted, split, atProd, below };
     return { region: r, pitch, half, offsets: offsets || [], shared: !!(offsets && offsets.length), lanes, context };
   }
 
@@ -1132,7 +1148,7 @@
       // dye than the longer one. Product 2 well above product 1 on both baselines is more likely a
       // primer dimer or a second PCR product than a cleavage product.
       if (prods.length === 2 && prods[0].found && prods[1].found && areas[1] + areas[2] >= 0.15 * total &&
-          areas[2] > 1.3 * areas[1] && alt[2] > 1.3 * alt[1] && !flags.includes('check band assignment')) flags.push('check band assignment');
+          areas[2] > 1.0 * areas[1] && alt[2] > 1.0 * alt[1] && !flags.includes('check band assignment')) flags.push('check band assignment');
       const e1 = editingGuschin(fc), e2 = altTotal > 0 ? editingGuschin((altTotal - alt[0]) / altTotal) : e1;
       const d = Math.abs(e1 - e2);
       let overlap = d >= OVERLAP.large || (d >= OVERLAP.points && Math.max(e1, e2) >= OVERLAP.ratio * Math.min(e1, e2));
