@@ -586,7 +586,35 @@
       return usable.length >= 3 && near.some(p => q.P - p > NEAR_BAND && near.filter(x => Math.abs(x - p) <= 2).length >= 2 &&
         offs.concat(allOffs).some(off => Math.abs(q.P - p - off) <= 3 + 0.05 * off));
     };
-    const lanes = pre.map(q => {
+    // A faint parent missed in one lane often shows in its neighbours: as a parent position two nearby
+    // lanes share, or as a band two nearby lanes show as their parent or above it. A lane with any real band
+    // there, above its own parent, may have taken a product for a faint parent (high editing); with
+    // two neighbours agreeing, a band of half the noise counts. So may a lane without products with a
+    // band one product offset above its parent. Bands in the well zone at the top of the box do not
+    // count. Positions come from the row without edits.
+    const reach = reachOf(n), well = Math.ceil(Math.max(3, 0.08 * n));
+    const bandAt = (q, u, tol, min) => {
+      for (let j = Math.max(well, Math.round(u - tol)); j <= Math.min(q.P - NEAR_BAND - 1, Math.round(u + tol)); j++) {
+        if (isLocalMax(q.ps, j) && !q.ov.removed.some(x => Math.abs(x - j) <= SAME_BAND) && prominence(q.ps, j, reach) >= min * q.noise) return true;
+      }
+      return false;
+    };
+    const aboveOf = q => {
+      const ref = prominence(q.ps, argmax(q.ps, 0, n - 1), reach), out = [];
+      for (let j = well; j < q.P - NEAR_BAND; j++) if (isLocalMax(q.ps, j) && prominence(q.ps, j, reach) >= Math.max(3 * q.noise, 0.05 * ref)) out.push(j);
+      return out;
+    };
+    const upper = ctx ? ctx.upper : (() => {
+      const bands = pre.map(aboveOf);
+      // Positions found in two lanes or more; each lane gives a list of positions.
+      const common = (lists, tol) => lists.flat().filter(v => lists.filter(l => l.some(w => Math.abs(w - v) <= tol)).length >= 2);
+      return pre.map(q => {
+        const near = usable.filter(o => o !== q && Math.abs(o.lane.x - q.lane.x) <= 4.5 * pitch);
+        if (usable.length < 3) return [];
+        return common(near.map(o => [o.P]), 2).concat(common(near.map(o => [o.P].concat(bands[pre.indexOf(o)])), SAME_BAND));
+      });
+    })();
+    const lanes = pre.map((q, i) => {
       let offs = q.ownOffsets || offsets || ownOffsets(q, prm.products);
       // A parent chosen by hand that none of the row's product positions fit (the row learnt them
       // from lanes whose parent was missed): the lane's own strongest products.
@@ -594,7 +622,29 @@
       const l = analyzeLane(q, offs, n, r, img, prm);
       if (q.offPattern) l.flags.push('product positions differ from the row');
       if (l.role === 'sample' && atProduct(q, offs)) l.flags.push('parent at a product position of the row');
+      if (l.role === 'sample' && !l.flags.includes('band above the parent') &&
+          (upper[i].some(u => u < q.P - NEAR_BAND && bandAt(q, u, SAME_BAND, 0.5)) ||
+           (!l.found.slice(1).some(Boolean) && offs.some(off => bandAt(q, q.P - off, offTol(off), 1))))) l.flags.push('band above the parent');
+      q.offs = offs;
       return l;
+    });
+    // One product, yet lanes show a band at a product position of the row with a further band above
+    // it, or no product where expected and a band above that place. Two such lanes with the further
+    // band at the same position mean the row cannot tell which band is the cleavage product and which
+    // a primer dimer (a dimer shows in uncut lanes too): every cut lane with that position above its
+    // product warns. Lanes whose parent may be a product do not count. Positions come from the row
+    // without edits. Not used with two products: there it flagged most lanes of rows that mix amplicons.
+    const above = (offs, off) => offs.length === 1 && off > NEAR_BAND && off < offs[0] - offTol(offs[0]);
+    const cut = i => lanes[i].found.slice(1).some(Boolean);
+    const lower = ctx ? ctx.lower : usable.length < 3 || prm.products !== 1 ? [] : consensusOffsets(usable.map(q => pre.indexOf(q))
+      .filter(i => !upper[i].some(u => u < pre[i].P - NEAR_BAND))
+      .map(i => {
+        const q = pre[i], bands = q.cands.filter(c => c.prom >= Math.max(4 * q.noise, 0.04 * (q.ps[q.P] - minOf(q.ps))));
+        const at = allOffs.filter(o => bands.some(c => Math.abs(c.off - o) <= offTol(o))).concat(cut(i) ? [] : q.offs);
+        return bands.filter(c => at.some(o => above([o], c.off)));
+      }), 8, 2);
+    lanes.forEach((l, i) => {
+      if (l.role === 'sample' && cut(i) && lower.some(o => above(pre[i].offs, o)) && !l.flags.includes('check band assignment')) l.flags.push('check band assignment');
     });
 
     const auto = lanes.filter(l => l.autoRole);
@@ -607,8 +657,8 @@
     const brighter = samples.filter(l => l.flags.includes('cleavage product brighter than parent'));
     const brighterRow = ctx ? ctx.brighterRow : samples.length >= 3 && brighter.length > samples.length / 2;
     // Rare in a real row; usually the box includes wells or a band above the parents.
-    if (brighterRow) brighter.forEach(l => l.flags.push('check band assignment'));
-    const context = { main: pre.main, P: pre.map(q => q.P), brighterRow };
+    if (brighterRow) brighter.forEach(l => { if (!l.flags.includes('check band assignment')) l.flags.push('check band assignment'); });
+    const context = { main: pre.main, P: pre.map(q => q.P), brighterRow, upper, lower };
     return { region: r, pitch, half, offsets: offsets || [], shared: !!(offsets && offsets.length), lanes, context };
   }
 

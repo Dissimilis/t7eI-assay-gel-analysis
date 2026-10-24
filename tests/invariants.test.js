@@ -37,15 +37,12 @@ for (const m of MODES) {
 
 for (const m of MODES) {
   test(`hard gels never read more than 10 points off without a warning (${label(m)})`, () => {
-    // Close bands, noise, sloped background, dimers, wells and clipping. Two products give the
-    // row enough to cross-check; with one product a few lanes above 75% editing slip through.
+    // Close bands, noise, sloped background, dimers, wells and clipping.
     const opts = Object.assign({ hard: true }, m);
-    const { out, lanes } = silentErrors(range(1, 150), opts, 10);
-    if (m.products === 2) assert.deepEqual(out, []);
-    else assert.ok(out.length <= 0.005 * lanes, `${out.length} of ${lanes} lanes:\n` + out.join('\n'));
+    assert.deepEqual(silentErrors(range(1, 150), opts, 10).out, []);
     // Smaller misses without a warning stay rare: mostly Valley where bands nearly touch.
     const small = silentErrors(range(1, 150), opts, 2.5);
-    assert.ok(small.out.length <= 0.03 * small.lanes, `${small.out.length} of ${small.lanes} lanes off by more than 2.5 points without a warning`);
+    assert.ok(small.out.length <= 0.015 * small.lanes,`${small.out.length} of ${small.lanes} lanes off by more than 2.5 points without a warning`);
   });
 }
 
@@ -113,7 +110,11 @@ test('heavy smoothing rarely moves a value without a warning', () => {
 });
 
 test('regressions found in review: these lanes are right or warned', () => {
-  for (const [seed, lane, products] of [[2789, 3, 2], [2726, 2, 2]]) {
+  // Faint parents missed at high editing (the neighbours show them), and one-product rows that took
+  // a primer dimer for the product.
+  const cases = [[2789, 3, 2], [2726, 2, 2], [509, 2, 2], [617, 0, 1], [617, 1, 1], [617, 2, 1], [8, 0, 1], [449, 1, 1], [910, 2, 1],
+    [205, 3, 1], [324, 0, 1], [324, 3, 1], [437, 1, 1], [620, 0, 1], [1204, 0, 1], [1115, 2, 1]];
+  for (const [seed, lane, products] of cases) {
     const g = t7Row(seed, { hard: true, products }), l = analyseRow(g.img, g.box, null, { products }).lanes[lane];
     assert.ok(l.role !== 'sample' || Math.abs(l.editing - g.truth[lane]) <= 10 || l.flags.some(T.isWarning), `seed ${seed} lane ${lane}: ${l.editing.toFixed(1)} vs ${g.truth[lane].toFixed(1)} [${l.flags}]`);
   }
