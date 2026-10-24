@@ -70,7 +70,7 @@
       bg: cssVar('--color-bg', '#f2f2f3'), warn: cssVar('--color-warn', '#a8552e')
     };
   }
-  const isWarn = T.isWarning;
+  const isWarn = T.isWarning, SAME = T.SAME_BAND;   // the engine's warning list and band radius
   const MAX_PIXELS = 40e6;
 
   function signal() {
@@ -896,8 +896,8 @@
   }
 
   function bandRole(r, i) {
-    if ((r.removed || []).some(j => Math.abs(j - i) <= 3)) return 'removed';
-    const k = r.peaks.findIndex((pk, m) => Math.abs(pk - i) <= 3 && (m === 0 || !r.found || r.found[m]));
+    if ((r.removed || []).some(j => Math.abs(j - i) <= SAME)) return 'removed';
+    const k = r.peaks.findIndex((pk, m) => Math.abs(pk - i) <= SAME && (m === 0 || !r.found || r.found[m]));
     if (k === 0) return 'parent';
     if (k > 0) return 'p' + k;
     return 'none';
@@ -912,7 +912,7 @@
   function setBand(lane, absY, role) {
     saveUndo(lane);
     const b = lane.bands ? JSON.parse(JSON.stringify(lane.bands)) : { parent: null, products: [null, null], removed: [] };
-    const same = v => v != null && Math.abs(v - absY) <= 3;
+    const same = v => v != null && Math.abs(v - absY) <= SAME;
     if (same(b.parent)) b.parent = null;
     b.products = b.products.map(v => (same(v) ? null : v));
     b.removed = b.removed.filter(v => !same(v));
@@ -927,7 +927,7 @@
   function openBandMenu(s, r, S, i) {
     const lane = laneAt(s.ri, s.li), role = bandRole(r, i), absY = i + r.y0;
     const b = lane.bands || {};
-    const manual = [b.parent].concat(b.products || [], b.removed || []).some(v => v != null && Math.abs(v - absY) <= 3);
+    const manual = [b.parent].concat(b.products || [], b.removed || []).some(v => v != null && Math.abs(v - absY) <= SAME);
     const m = els.bandMenu;
     m.textContent = '';
     const title = document.createElement('div');
@@ -973,16 +973,16 @@
     if (box.hidden) return;
     const lane = laneAt(s.ri, s.li), b = lane.bands || {};
     const all = [];
-    r.peaks.concat(r.removed || [], r.candidates || []).forEach(i => { if (!all.some(j => Math.abs(j - i) <= 3)) all.push(i); });
+    r.peaks.concat(r.removed || [], r.candidates || []).forEach(i => { if (!all.some(j => Math.abs(j - i) <= SAME)) all.push(i); });
     all.sort((a, c) => a - c);
     box.textContent = '';
     const table = document.createElement('table');
     all.forEach(i => {
       const absY = i + r.y0, role = bandRole(r, i);
-      const manualRole = Math.abs((b.parent ?? -99) - absY) <= 3 ? 'parent'
-        : (b.products || []).findIndex(v => v != null && Math.abs(v - absY) <= 3) === 0 ? 'p1'
-        : (b.products || []).findIndex(v => v != null && Math.abs(v - absY) <= 3) === 1 ? 'p2'
-        : (b.removed || []).some(v => Math.abs(v - absY) <= 3) ? 'removed' : 'auto';
+      const manualRole = Math.abs((b.parent ?? -99) - absY) <= SAME ? 'parent'
+        : (b.products || []).findIndex(v => v != null && Math.abs(v - absY) <= SAME) === 0 ? 'p1'
+        : (b.products || []).findIndex(v => v != null && Math.abs(v - absY) <= SAME) === 1 ? 'p2'
+        : (b.removed || []).some(v => Math.abs(v - absY) <= SAME) ? 'removed' : 'auto';
       const tr = document.createElement('tr');
       const td = (t, cls) => { const d = document.createElement('td'); if (cls) d.className = cls; if (t instanceof Node) d.appendChild(t); else d.textContent = t; tr.appendChild(d); };
       td(i + ' px', 'num');

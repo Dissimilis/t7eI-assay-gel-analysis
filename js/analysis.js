@@ -16,6 +16,12 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  // Band matching, in profile pixels.
+  const SAME_BAND = 3;                                    // two positions this close are one band
+  const NEAR_BAND = 4;                                    // "next to" a band: no separate band fits here
+  const offTol = off => 3 + 0.15 * off;                   // a band matches a product offset within this
+  const reachOf = n => Math.max(10, Math.round(n / 4));   // how far prominence looks for the surrounding floor
+
   // Overlapping bands: flagged when % editing on the lane's baseline and on a straight baseline
   // differ by at least `points` and by a factor of `ratio`, or by `large` points in any case.
   const OVERLAP = Object.freeze({ points: 4, ratio: 1.75, large: 8 });
@@ -338,7 +344,7 @@
     // Faint products next to a strong parent are typical of low editing: the noise floor matters most.
     const minProm = Math.max(3 * noise, 0.015 * height);
     const out = [];
-    for (let j = P + 4; j < ps.length - 1; j++) {
+    for (let j = P + NEAR_BAND; j < ps.length - 1; j++) {
       if (!isLocalMax(ps, j)) continue;
       const prom = prominence(ps, j, Math.max(8, j - P));
       if (prom >= minProm) out.push({ off: j - P, prom });
@@ -443,10 +449,10 @@
       const ps = smooth(p, prm.smoothing);
       const noise = Math.max(1e-3, noiseSigma(p));
       const ov = laneOverrides(lane, ps, r.y0);
-      const near = i => ov.removed.some(j => Math.abs(j - i) <= 3);
+      const near = i => ov.removed.some(j => Math.abs(j - i) <= SAME_BAND);
       // Neither a removed band (for example a heteroduplex taken as parent) nor a band chosen by hand as a
       // product can be the automatic parent; the flank of a removed band is not a peak either.
-      const notParent = i => near(i) || ov.products.some(j => j != null && Math.abs(j - i) <= 3);
+      const notParent = i => near(i) || ov.products.some(j => j != null && Math.abs(j - i) <= SAME_BAND);
       let top = -1;
       for (let i = 1; i < n - 1; i++) if (!notParent(i) && isLocalMax(ps, i) && (top < 0 || ps[i] > ps[top])) top = i;
       if (top < 0) top = argmax(ps, 0, n - 1);
@@ -459,8 +465,8 @@
       q.autoP = autoP;
       // The uppermost faint band below the well zone: the parent when editing is high enough that it
       // falls under the cut parentIndex uses (about 65% and above; found up to about 87%).
-      const reach = Math.max(10, Math.round(n / 4)), ref = prominence(ps, autoTop, reach), well = Math.max(3, 0.08 * n);
-      for (let j = Math.ceil(well); j < autoP - 4; j++) {
+      const reach = reachOf(n), ref = prominence(ps, autoTop, reach), well = Math.max(3, 0.08 * n);
+      for (let j = Math.ceil(well); j < autoP - NEAR_BAND; j++) {
         if (isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.02 * ref)) { q.faintP = j; q.faintCands = productCandidates(ps, j, noise); break; }
       }
       q.strong = strongPeaks(ps, autoP, n);
@@ -469,7 +475,7 @@
     // Band positions most lanes share (parents, products, a well, a primer dimer) are not a ladder's
     // signature. A ladder has more strong bands than parent plus two products, most of them its own;
     // keep it out of the vote. Judged on the automatic bands, like the vote.
-    const sharedAt = j => pre.length >= 3 && pre.filter(o => o.strong.some(k => Math.abs(k - j) <= 3)).length >= Math.max(3, Math.ceil(pre.length / 2));
+    const sharedAt = j => pre.length >= 3 && pre.filter(o => o.strong.some(k => Math.abs(k - j) <= SAME_BAND)).length >= Math.max(3, Math.ceil(pre.length / 2));
     pre.forEach(q => {
       q.sharedAt = sharedAt;
       q.ladderLike = !q.lane.role && q.strong.length >= 4 && q.strong.filter(j => !sharedAt(j)).length >= 3;
@@ -495,7 +501,7 @@
       if (offsets.length < prm.products) {
         // Keep the agreed positions and add the next most common ones, seen in at least two lanes.
         const lists = usable.map(q => q.voteCands);
-        const extra = consensusOffsets(lists, 8, 2).filter(o => !offsets.some(e => Math.abs(e - o) <= 3 + 0.15 * Math.max(e, o)));
+        const extra = consensusOffsets(lists, 8, 2).filter(o => !offsets.some(e => Math.abs(e - o) <= offTol(Math.max(e, o))));
         offsets = offsets.concat(extra).slice(0, prm.products).sort((a, b) => a - b);
       }
       if (!offsets.length) {
@@ -504,7 +510,7 @@
         offsets = best.voteCands.slice().sort((a, b) => b.prom - a.prom).slice(0, prm.products).map(c => c.off).sort((a, b) => a - b);
       }
     }
-    const tolOf = o => 3 + 0.15 * o;
+    const tolOf = offTol;
     if (offsets && offsets.length >= 2) {
       // Both products show in the same cut lanes. A position seen in under half as many lanes as the
       // other is more likely a band of a few lanes (a dimer, a second product): lanes using it warn.
@@ -549,7 +555,7 @@
           if (!best || betterFit(fit.fit, best.fit)) best = { k, pat, P: fit.P, fit: fit.fit };
         });
         if (best.P !== q.P) {
-          const near = j => q.ov.removed.some(x => Math.abs(x - j) <= 3);
+          const near = j => q.ov.removed.some(x => Math.abs(x - j) <= SAME_BAND);
           q.P = best.P;
           q.cands = productCandidates(q.ps, best.P, q.noise).filter(c => !near(best.P + c.off));
         }
@@ -569,7 +575,7 @@
     const allOffs = patterns.flat();
     const atProduct = (q, offs) => {
       const near = usable.filter(o => o !== q && Math.abs(o.lane.x - q.lane.x) <= 4.5 * pitch).map(o => o.P);
-      return usable.length >= 3 && near.some(p => q.P - p > 4 && near.filter(x => Math.abs(x - p) <= 2).length >= 2 &&
+      return usable.length >= 3 && near.some(p => q.P - p > NEAR_BAND && near.filter(x => Math.abs(x - p) <= 2).length >= 2 &&
         offs.concat(allOffs).some(off => Math.abs(q.P - p - off) <= 3 + 0.05 * off));
     };
     const lanes = pre.map(q => {
@@ -610,11 +616,11 @@
   /** Parent candidate whose product offsets match the most bands; ties keep the first-pass choice. */
   function bestParent(q, offsets, n) {
     const { ps, noise } = q;
-    const reach = Math.max(10, Math.round(n / 4));
+    const reach = reachOf(n);
     const top = argmax(ps, 0, n - 1);
     const ref = prominence(ps, top, reach);
-    const removed = j => q.ov && q.ov.removed.some(x => Math.abs(x - j) <= 3);
-    const hand = j => removed(j) || (q.ov && q.ov.products.some(x => x != null && Math.abs(x - j) <= 3));
+    const removed = j => q.ov && q.ov.removed.some(x => Math.abs(x - j) <= SAME_BAND);
+    const hand = j => removed(j) || (q.ov && q.ov.products.some(x => x != null && Math.abs(x - j) <= SAME_BAND));
     const cands = [q.P].concat(hand(top) ? [] : [top], q.faintP != null && !hand(q.faintP) ? [q.faintP] : []);
     for (let j = 1; j < n - 1; j++) {
       if (j !== q.P && j !== top && !hand(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.05 * ref)) cands.push(j);
@@ -626,7 +632,7 @@
     const well = Math.max(3, 0.08 * n);   // smear from a well at the top of the box does not count against a parent
     const score = P => {
       const acc = offsets.reduce((a, off) => {
-        const tol = 3 + 0.15 * off;
+        const tol = offTol(off);
         let dev = Infinity;
         for (let j = Math.max(1, Math.round(P + off - tol)); j <= Math.min(n - 2, Math.round(P + off + tol)); j++) {
           if (!removed(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= 3 * noise) dev = Math.min(dev, Math.abs(j - P - off));
@@ -634,7 +640,7 @@
         return isFinite(dev) ? { hits: a.hits + 1, dev: a.dev + dev } : a;
       }, { hits: 0, dev: 0 });
       // Strong bands the choice leaves unexplained: below the parent and off the pattern, or above it.
-      acc.left = strong.filter(j => (j > P + 4 && !offsets.some(off => Math.abs(j - P - off) <= 3 + 0.15 * off)) || (j < P - 4 && j >= well)).length;
+      acc.left = strong.filter(j => (j > P + NEAR_BAND && !offsets.some(off => Math.abs(j - P - off) <= offTol(off))) || (j < P - NEAR_BAND && j >= well)).length;
       acc.complete = offsets.length >= (q.products || 2);
       return acc;
     };
@@ -655,9 +661,9 @@
    * larger cleavage product is brighter than the uncut band.
    */
   function parentIndex(ps, top, n, noise, skip) {
-    const reach = Math.max(10, Math.round(n / 4));
+    const reach = reachOf(n);
     const ref = prominence(ps, top, reach);
-    for (let j = 1; j < top - 4; j++) {
+    for (let j = 1; j < top - NEAR_BAND; j++) {
       if (!isLocalMax(ps, j) || (skip && skip(j))) continue;
       const pr = prominence(ps, j, reach);
       if (pr >= 0.2 * ref && pr >= 4 * noise) return j;
@@ -710,8 +716,8 @@
     const parentProm = ps[P] - minOf(ps);
     const out = [P];
     for (let j = 1; j < n - 1; j++) {
-      if (Math.abs(j - P) <= 4 || !isLocalMax(ps, j)) continue;
-      if (prominence(ps, j, Math.max(10, Math.round(n / 4))) >= 0.25 * parentProm) out.push(j);
+      if (Math.abs(j - P) <= NEAR_BAND || !isLocalMax(ps, j)) continue;
+      if (prominence(ps, j, reachOf(n)) >= 0.25 * parentProm) out.push(j);
     }
     return out;
   }
@@ -720,11 +726,11 @@
     const { ps, P, noise, ov } = q;
     const flags = [];
     const parentProm = ps[P] - minOf(ps);
-    const nearRemoved = i => ov.removed.some(j => Math.abs(j - i) <= 3);
+    const nearRemoved = i => ov.removed.some(j => Math.abs(j - i) <= SAME_BAND);
     if (ov.any) flags.push('manual band assignment');
     // Bands chosen by hand are reserved: automatic products never take them a second time.
     const reserved = [q.parentFixed ? P : null].concat(ov.products).filter(i => i != null);
-    const taken = (i, k) => reserved.some((j, r) => Math.abs(j - i) <= 3 && !(r > 0 && ov.products[r - 1] != null && r - 1 === k));
+    const taken = (i, k) => reserved.some((j, r) => Math.abs(j - i) <= SAME_BAND && !(r > 0 && ov.products[r - 1] != null && r - 1 === k));
 
     // Products at the consensus offsets relative to this lane's own parent (handles tilt and smile).
     // A product chosen by hand wins; a removed band is never picked.
@@ -740,8 +746,8 @@
         prods.push({ y: Math.round((P + (next != null ? next : n - 1)) / 2), found: false, slotOnly: true });
         continue;
       }
-      const lo = k === 0 ? Math.max(P + 3, P + off - (3 + 0.15 * off)) : P + (offsets[k - 1] + off) / 2;
-      const hi = k === offsets.length - 1 ? P + off + 3 + 0.15 * off : P + (off + offsets[k + 1]) / 2;
+      const lo = k === 0 ? Math.max(P + 3, P + off - offTol(off)) : P + (offsets[k - 1] + off) / 2;
+      const hi = k === offsets.length - 1 ? P + off + offTol(off) : P + (off + offsets[k + 1]) / 2;
       let c = -1;
       for (let i = Math.max(0, Math.round(lo)); i <= Math.min(n - 1, Math.round(hi)); i++) {
         if (!nearRemoved(i) && !taken(i, k) && (c < 0 || ps[i] > ps[c])) c = i;
@@ -769,7 +775,7 @@
     const sortedPeaks = peaks.slice().sort((a, b) => a - b);
     const below = 1.5 * (sortedPeaks.length > 1 ? sortedPeaks[sortedPeaks.length - 1] - sortedPeaks[sortedPeaks.length - 2] : above);
     // An undetected product only marks where it was expected; when that spot is another band it gets no segment.
-    const collides = (y, i) => peaks.some((o, j) => j !== i && Math.abs(o - y) <= 3) || nearRemoved(y);
+    const collides = (y, i) => peaks.some((o, j) => j !== i && Math.abs(o - y) <= SAME_BAND) || nearRemoved(y);
     const bands = peaks.map((y, i) => ({ y, kind: i })).filter(b => b.kind === 0 || prods[b.kind - 1].found || (!prods[b.kind - 1].slotOnly && !collides(b.y, b.kind)))
       .concat(ov.removed.filter(y => y > P - above && y < lowest + below && !peaks.some((p, i) => (i === 0 || prods[i - 1].found) && Math.abs(p - y) <= 2)).map(y => ({ y, kind: -1 })))
       .sort((a, b) => a.y - b.y || a.kind - b.kind);
@@ -835,7 +841,7 @@
         (prm.products === 2 && prods.length === 1 && prods[0].found))) flags.push('only one cleavage product found');
     if (P !== argmax(pm, 0, n - 1)) flags.push('cleavage product brighter than parent');
     if (prm.products === 1 && offsets.length === 1 &&
-        q.cands.some(c => c.off > offsets[0] + 3 + 0.15 * offsets[0] && c.prom >= 0.1 * parentProm)) {
+        q.cands.some(c => c.off > offsets[0] + offTol(offsets[0]) && c.prom >= 0.1 * parentProm)) {
       flags.push('second product visible: set two products');
     }
 
@@ -846,7 +852,7 @@
 
     // Automatic role: a ladder has strong bands that match neither the parent nor the products.
     {
-      const lo = minOf(ps), hP = ps[P] - lo, last = valleys[valleys.length - 1], reach = Math.max(10, Math.round(n / 4));
+      const lo = minOf(ps), hP = ps[P] - lo, last = valleys[valleys.length - 1], reach = reachOf(n);
       const lastHeight = Math.max(heights[heights.length - 1], noise);
       // A boundary at the end of the profile while the signal is still sloping there means the box cut a band tail.
       // Pixel noise from curvature: a short box full of band flanks would inflate the slope-based estimate.
@@ -859,14 +865,14 @@
       } else if (P <= Math.max(3, 0.06 * n)) {
         flags.push('band at the top of the box: a well?');
       }
-      const isPeak = j => peaks.some(y => Math.abs(y - j) <= 4) || nearRemoved(j);
+      const isPeak = j => peaks.some(y => Math.abs(y - j) <= NEAR_BAND) || nearRemoved(j);
       // Look a little below the last measured band too: a real product can be pushed out of the range.
       const lastY = Math.max(...peaks), tail = Math.min(n - 2, Math.round(lastY + 0.6 * (lastY - P)));
       for (let j = valleys[0] + 1; j <= Math.max(last - 1, tail); j++) {
         if (!isPeak(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.04 * hP)) { flags.push('unassigned band inside the measured range'); break; }
       }
       const ref = prominence(ps, argmax(ps, 0, n - 1), reach);
-      for (let j = 1; j < P - 4; j++) {
+      for (let j = 1; j < P - NEAR_BAND; j++) {
         if (!nearRemoved(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.05 * ref)) { flags.push('band above the parent'); break; }
       }
       if (q.extraBand) flags.push('extra band not matching the cleavage products');
@@ -878,11 +884,11 @@
       // inside the row is a sample with an extra band. An end lane is a ladder when strong bands that
       // neither its parent, its products nor a band most lanes share explain are left over.
       const endish = q.isEnd || q.rowLanes < 3;
-      const explained = j => Math.abs(j - P) <= 4 || q.sharedAt(j) || offsets.some(off => Math.abs(j - P - off) <= 3 + 0.15 * off) ||
+      const explained = j => Math.abs(j - P) <= NEAR_BAND || q.sharedAt(j) || offsets.some(off => Math.abs(j - P - off) <= offTol(off)) ||
         (prm.products === 1 && offsets.length === 1 && j - P > offsets[0]);   // the second product, not a ladder band
       let left = 0;
       for (let j = 1; endish && !q.ladderLike && !q.fitsPattern && j < n - 1; j++) {
-        if (isLocalMax(ps, j) && !explained(j) && prominence(ps, j, Math.max(10, Math.round(n / 4))) >= 0.25 * parentProm) left++;
+        if (isLocalMax(ps, j) && !explained(j) && prominence(ps, j, reachOf(n)) >= 0.25 * parentProm) left++;
       }
       if (q.ladderLike && !endish) flags.push('extra band not matching the cleavage products');
       role = (q.ladderLike ? endish : left > 0) ? 'marker' : 'sample';
@@ -948,7 +954,7 @@
   }
 
   return {
-    DEFAULTS, ROLES, WARNINGS, isWarning,
+    DEFAULTS, ROLES, WARNINGS, isWarning, SAME_BAND,
     rgbaToGray, makeImage, detectPolarity, signalImage,
     smooth, opening, noiseSigma, median, estimatePitch,
     detectLanes, laneProfile, analyzeRow, analyze,
