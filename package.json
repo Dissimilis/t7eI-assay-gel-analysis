@@ -1,6 +1,6 @@
 {
   "name": "t7eI-gel-analysis",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Densitometry of T7E1 mismatch-cleavage gels in the browser",
   "private": true,
   "license": "MIT",

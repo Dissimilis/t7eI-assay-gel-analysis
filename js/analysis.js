@@ -680,7 +680,12 @@
         return bands.filter(c => at.some(o => above([o], c.off))).map(c => Object.assign({ strong: c.prom >= 0.1 * (q.ps[q.P] - minOf(q.ps)) }, c));
       });
       // One lane is enough when its further band is strong: a row with a single cut lane.
-      return consensusOffsets(lists, 8, 2).concat(consensusOffsets(lists.map(l => l.filter(c => c.strong)), 8, 1));
+      // A product pattern of two lanes or more above the main one, and a lane whose parent sits well
+      // below the parent nearby lanes share (its band is then a product that far below), say the same.
+      const sure = (q, i) => !upper[i].some(u => u < q.P - NEAR_BAND);
+      const others = patterns.filter((pat, k) => k !== pre.main && pre.filter((q, i) => q.patternK === k && sure(q, i)).length >= 2).map(pat => pat[0]);
+      const shifted = pre.flatMap((q, i) => nearParents[i].filter(u => q.P - u >= 10).map(u => q.P - u));
+      return consensusOffsets(lists, 8, 2).concat(consensusOffsets(lists.map(l => l.filter(c => c.strong)), 8, 1), others, shifted);
     })();
     lanes.forEach((l, i) => {
       if (l.role === 'sample' && cut(i) && lower.some(o => above(pre[i].offs, o)) && !l.flags.includes('check band assignment')) l.flags.push('check band assignment');
