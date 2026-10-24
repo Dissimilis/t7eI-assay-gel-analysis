@@ -112,6 +112,25 @@ test('the app in a browser', { skip: !chrome && 'no Chrome found (set CHROME_PAT
       const dataLines = csv.text.split(/\r\n/).filter(l => l && !l.startsWith('#') && !l.startsWith('﻿#') && !/^row,/.test(l));
       assert.equal(dataLines.length, before.length, 'one CSV line per lane');
       assert.deepEqual(xlsx.head, [0x50, 0x4b, 0x03, 0x04], 'XLSX is a zip');
+      // The numbers match the table: parent area and % editing of every lane.
+      const shown = await page.eval(`Array.from(document.querySelectorAll('#resBody tr')).map(tr => [tr.querySelector('td.num').textContent, tr.querySelector('td.ed-val').textContent])`);
+      const head = csv.text.split('\r\n').map(l => l.replace('\ufeff', '')).find(l => l.startsWith('row,')).split(',');
+      const col = name => head.indexOf(name);
+      dataLines.forEach((line, i) => {
+        const c = line.split(',');
+        const parent = c[col('parent_area')], ed = c[col('editing_pct')];
+        // Two decimals in the file, one on screen, both rounded from the same value.
+        const near = (v, txt) => (v == null ? txt === '—' : Math.abs(v - Number(txt)) <= 0.051);
+        assert.ok(near(ed === '' ? null : Number(ed), shown[i][1]), `CSV % editing, lane ${i}: ${ed} vs ${shown[i][1]}`);
+        // The table rounds the raw area, the CSV keeps two decimals of it: they agree to half a unit.
+        if (parent !== '') assert.ok(Math.abs(Number(parent) - Number(shown[i][0].replace(/[^0-9.]/g, ''))) <= 0.51, `CSV parent area, lane ${i}: ${parent} vs ${shown[i][0]}`);
+      });
+      const sheet = await page.eval(`(async () => { const b = window.__blobs.find(x => /spreadsheetml/.test(x.type)); return new TextDecoder('latin1').decode(new Uint8Array(await b.arrayBuffer())); })()`);
+      const cell = (colName, r) => { const m = sheet.match(new RegExp('<c r="' + colName + r + '"[^>]*><v>([^<]+)</v>')); return m ? Number(m[1]) : null; };
+      shown.forEach((s, i) => {
+        const e = cell('J', i + 2);
+        assert.ok(e == null ? s[1] === '—' : Math.abs(e - Number(s[1])) <= 0.051, `XLSX % editing, lane ${i}: ${e} vs ${s[1]}`);
+      });
       assert.deepEqual(png.head, [0x89, 0x50, 0x4e, 0x47], 'PNG signature');
     });
 

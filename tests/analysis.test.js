@@ -540,3 +540,55 @@ test('a band boundary dragged past a band is flagged', () => {
   const dragged = analyseLanes(img, box, i => (i === 1 ? { valleys: v } : {})).lanes[1];
   assert.ok(dragged.flags.includes('band boundary crosses a band'), `[${dragged.flags.join('; ')}]`);
 });
+
+// Safety checks that no other test would miss if they broke.
+test('a band between the products in one lane is flagged as unassigned', () => {
+  const lanes = fourLanes(20).map((l, i) => (i === 2 ? { x: l.x, bands: l.bands.concat([[78, 0.15]]) } : l));
+  const row = analyseBox(bandGel(lanes, { w: 500 }), { x0: 0, x1: 500, y0: 5, y1: 135 });
+  assert.ok(row.lanes[2].flags.includes('unassigned band inside the measured range'), `[${row.lanes[2].flags}]`);
+  [0, 1, 3].forEach(i => assert.ok(!row.lanes[i].flags.includes('unassigned band inside the measured range'), 'lane ' + i));
+});
+
+test('a clipped product band is flagged', () => {
+  const img = bandGel(fourLanes(70), { w: 500, amp: 400 });
+  for (let i = 0; i < img.gray.length; i++) img.gray[i] = Math.max(0, img.gray[i]);
+  const row = analyseBox(img, { x0: 0, x1: 500, y0: 5, y1: 135 });
+  row.lanes.forEach((l, i) => assert.ok(l.flags.includes('product saturated'), `lane ${i}: [${l.flags}]`));
+});
+
+test('a lone faint bump in an uncut lane is not counted as a product', () => {
+  const lanes = fourLanes([20, 20, 20, 0]).map((l, i) => (i === 3 ? { x: l.x, bands: [[30, 1], [60, 0.004]] } : l));
+  const img = bandGel(lanes, { w: 500 });
+  let seed = 11;
+  for (let i = 0; i < img.gray.length; i++) { seed = (seed * 16807) % 2147483647; img.gray[i] += (seed / 2147483647 - 0.5) * 3; }
+  const l = analyseBox(img, { x0: 0, x1: 500, y0: 5, y1: 135 }).lanes[3];
+  assert.equal(l.editing, 0, `[${l.flags}]`);
+  assert.ok(l.flags.includes('product 1 not detected'));
+});
+
+test('one-product mode on lanes with two products asks for two', () => {
+  const img = bandGel(fourLanes(20), { w: 500 }), box = { x0: 0, x1: 500, y0: 5, y1: 135 };
+  const d = T.detectLanes(T.signalImage(img, 'dark'), img, box);
+  const row = T.analyze(img, [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null })) })], { polarity: 'dark', products: 1 }).rows[0];
+  row.lanes.forEach((l, i) => assert.ok(l.flags.some(f => /second product visible/.test(f)), `lane ${i}: [${l.flags}]`));
+});
+
+test('one lane at high editing with its faint parent above warns instead of reading 0%', () => {
+  const g = new Float32Array(120 * 110).fill(200);
+  for (let x = 35; x <= 85; x++) for (let y = 0; y < 110; y++) g[y * 120 + x] = 200 - 100 * (0.0289 * Math.exp(-((y - 30) ** 2) / 32) + 0.9711 * Math.exp(-((y - 65) ** 2) / 32));
+  for (const products of [1, 2]) {
+    const l = T.analyze(T.makeImage(g, 120, 110), [{ x0: 10, x1: 110, y0: 0, y1: 110, pitch: 100, lanes: [{ x: 60, role: null }] }], { polarity: 'dark', products }).rows[0].lanes[0];
+    assert.ok(Math.abs(l.editing - 83) <= 10 || l.flags.some(T.isWarning), `${products} products: ${l.editing}% [${l.flags}]`);
+  }
+});
+
+test('a missing product stays missing and warned when the boundaries are set by hand', () => {
+  const fc = 1 - 0.8 ** 2;
+  const lanes = [60, 160, 260, 360, 460, 560].map((x, i) => ({ x, bands: [[30, 1 - fc], [60, fc * 2 / 3]].concat(i === 2 ? [] : [[95, fc / 3]]) }));
+  const img = bandGel(lanes, { w: 650 }), box = { x0: 0, x1: 650, y0: 5, y1: 160 };
+  const auto = analyseLanes(img, box, () => ({})).lanes[2], v = auto.valleys.map(y => y + auto.y0);
+  v[1] += 1;
+  const l = analyseLanes(img, box, i => (i === 2 ? { valleys: v } : {})).lanes[2];
+  assert.equal(l.areas[2], 0);
+  assert.ok(l.flags.includes('only one cleavage product found') && l.flags.includes('product 2 not detected'), `[${l.flags}]`);
+});

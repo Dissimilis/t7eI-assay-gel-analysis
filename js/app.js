@@ -3,7 +3,7 @@
   'use strict';
 
   const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample, XLSX = window.T7EIXlsx;
-  const VERSION = '1.3.0';
+  const VERSION = '1.4.0';
   const STORE = 't7eI.params.v1';
   const $ = id => document.getElementById(id);
 
@@ -672,7 +672,7 @@
       'cleavage product brighter than parent': 'brighter product', 'manual band assignment': 'bands set',
       'removed band overlaps a measured band': 'overlap', 'product positions differ from the row': 'other pattern',
       'bands overlap: result depends on the baseline': 'bands overlap', 'band boundary crosses a band': 'boundary crosses band',
-      'parent at a product position of the row': 'parent at product', 'manual band boundaries ignored: the number of bands changed': 'edits dropped' })[f] ||
+      'parent at a product position of the row': 'parent at product', 'result depends on the smoothing': 'smoothing', 'manual band boundaries ignored: the number of bands changed': 'edits dropped' })[f] ||
       f.replace('product ', 'P').replace(' not detected', ' missing').replace(/fraction cleaved > 0.5.*/, 'f > 0.5');
   }
 
@@ -829,10 +829,13 @@
     const ri = state.rows.findIndex(row => row.id === d.rowId);
     const li = ri < 0 ? -1 : state.rows[ri].lanes.findIndex(l => l.id === d.laneId);
     if (li < 0 || ri !== s.ri || li !== s.li) { state.drag = null; return; }
-    const lane = laneAt(ri, li), v = (lane.valleys || d.start).map(y => y - r.y0);
+    // Drag what is on screen: stored boundaries that no longer fit the bands are not in use.
+    const lane = laneAt(ri, li);
+    const own = lane.valleys && lane.valleys.length === d.start.length ? lane.valleys : d.start;
+    const v = own.map(y => y - r.y0);
     const lo = d.k === 0 ? 0 : v[d.k - 1] + 1, hi = d.k === v.length - 1 ? S.n - 1 : v[d.k + 1] - 1;
     const to = clamp(S.I(mx), lo, hi);
-    if (!lane.valleys && to === v[d.k]) return;   // pointer jitter on the handle is not an edit
+    if (own === d.start && to === v[d.k]) return;   // pointer jitter on the handle is not an edit
     if (!d.saved) { saveUndo(lane); d.saved = true; }
     v[d.k] = to;
     lane.valleys = v.map(i => i + r.y0);
@@ -1146,7 +1149,7 @@
       if (r.role === 'marker') return;
       x.textBaseline = 'top';
       x.font = `600 ${15 * u}px "Barlow Condensed", sans-serif`;
-      label(isFinite(r.editing) ? String(Math.round(r.editing)) : '—', cx, row.y1 + 4 * u, ink);
+      label(fmtPct(r.editing), cx, row.y1 + 4 * u, ink);   // the same tenth as the table
     }));
     const p = state.params;
     x.textAlign = 'left'; x.textBaseline = 'middle'; x.fillStyle = col.text;

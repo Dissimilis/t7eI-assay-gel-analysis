@@ -78,6 +78,7 @@ Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit c
 | bands set | Bands were removed or assigned by hand (`manual band assignment`). |
 | overlap | A removed band runs into a measured band, so its share cannot be separated cleanly; check the value. |
 | bands overlap | Neighbouring bands run into each other, typically faint products on the tail of a strong parent. Measured on one straight line under the lane instead, % editing differs by at least 4 points and by a factor of 1.75, or by 8 points or more; or a fit of one band shape per band, which separates touching bands, differs from the value by 3 points or more. Either way the value depends on how touching bands are split. Compare with *Envelope*. |
+| smoothing | Smoothing is above the default and the lane's value moves by 2 points or more against the default smoothing: bands may have been merged. |
 | other pattern | The lane follows a different product pattern than most lanes of its row (rows can mix amplicons; `product positions differ from the row`). The pattern is the app's own guess, so check the bands. |
 | parent at product | The lane's parent sits one product offset below the parents of nearby lanes: at high editing the faint parent may have been missed and a product taken for it. Check the band assignment. |
 
@@ -93,10 +94,13 @@ The engine was also compared with careful hand analysis in ImageJ of a real Invi
 
 - **Normal gels** (bands at least six band widths apart, light noise, editing up to 70%): every sample lane reads within 2.5 points of the truth or carries a warning.
 - **Hard gels** (bands four widths apart, more noise, a sloped background, primer dimers, wells inside the box, clipped bands, editing up to 85%): with two products no lane is more than 10 points off without a warning; with one product at most 0.5% of lanes are. Smaller errors without a warning are rare (at most 3% of lanes off by more than 2.5 points), mostly the *Valley* background reading low where bands nearly touch.
-- **Hand edits** change only their own lane: the row's shared decisions and every other lane come from the same row with all edits taken out.
+- **Hand edits** change only their own lane: the row's shared decisions and every other lane come from the same row with all edits taken out, and a second edit leaves the first edited lane as it was. Confirming the band the app already chose changes neither the value nor the warnings, and moving a boundary by hand keeps a lane's warnings.
+- **Heavy smoothing** (4 px) leaves at most 1% of lanes more than 2.5 points off without a warning.
 - **Lane order** changes no result, random boxes and settings never crash, and the same input always gives the same result.
 
 An end lane with a strong extra band of its own (for example a primer dimer only in that lane) is shown as a ladder, without a value. **Measure this lane** measures it as a sample.
+
+Rows of one or two lanes have no other lanes to cross-check against, so fewer problems are flagged there; a box around one or two lanes of a nearly noise-free (smoothed or upscaled) export can also find the wrong number of lanes, which shows on the image. With one cleavage product and a primer dimer in most lanes, the row can take the dimer for the product, and an uncut lane with only the dimer then reads about 10% without a warning.
 
 ## Limitations of the assay
 

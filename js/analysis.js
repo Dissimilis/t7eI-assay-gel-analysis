@@ -50,7 +50,7 @@
     'band at the top of the box: a well?', 'unassigned band inside the measured range', 'band above the parent',
     'extra band not matching the cleavage products', 'check band assignment', 'only one cleavage product found',
     'removed band overlaps a measured band', 'bands overlap: result depends on the baseline', 'band boundary crosses a band',
-    'parent at a product position of the row', 'product positions differ from the row']);
+    'parent at a product position of the row', 'product positions differ from the row', 'result depends on the smoothing']);
   function isWarning(flag) { return WARNINGS.includes(flag) || /invalid|second product visible/.test(flag); }
 
   // ---------------------------------------------------------------- images
@@ -432,13 +432,14 @@
     if (!edited.some(Boolean)) return measureRow(sig, img, row, params);
     const plain = lane => ({ x: lane.x, role: lane.role === 'sample' ? null : lane.role, label: lane.label });
     const auto = measureRow(sig, img, Object.assign({}, row, { lanes: row.lanes.map(plain) }), params);
-    const res = measureRow(sig, img, row, params);
+    const res = measureRow(sig, img, row, params, auto.context);
     res.lanes = res.lanes.map((l, i) => (edited[i] ? l : auto.lanes[i]));
     res.offsets = auto.offsets; res.shared = auto.shared;
     return res;
   }
 
-  function measureRow(sig, img, row, params) {
+  /** `ctx`: the row-level decisions of the same row without edits, reused when measuring edited lanes. */
+  function measureRow(sig, img, row, params, ctx) {
     const prm = Object.assign({}, DEFAULTS, params);
     const r = normRegion(row, img);
     const n = r.y1 - r.y0;
@@ -568,8 +569,9 @@
         q.fitsPattern = best.fit.hits === best.pat.length && best.fit.left === 0;
         if (best.k > 0) q.ownOffsets = best.pat;
       });
-      const uses = patterns.map((_, k) => pre.filter(q => q.patternK === k && !q.ov.any).length);
-      const main = uses.indexOf(Math.max(...uses));
+      const uses = patterns.map((_, k) => pre.filter(q => q.patternK === k).length);
+      const main = ctx ? ctx.main : uses.indexOf(Math.max(...uses));
+      pre.main = main;
       pre.forEach(q => { q.offPattern = q.patternK != null && q.patternK !== main; });
     }
     // With fewer than three lanes there is no majority to vote: each lane uses its own strongest products.
@@ -578,16 +580,20 @@
     // since a gel's smile moves parents across the row. Parents of one amplicon line up closely, so
     // this test is held tighter than offTol: within 2 px of each other, 3 px + 5% of the offset.
     const allOffs = patterns.flat();
+    const parentOf = o => (ctx ? ctx.P[pre.indexOf(o)] : o.P);   // nearby lanes as found without edits
     const atProduct = (q, offs) => {
-      const near = usable.filter(o => o !== q && Math.abs(o.lane.x - q.lane.x) <= 4.5 * pitch).map(o => o.P);
+      const near = usable.filter(o => o !== q && Math.abs(o.lane.x - q.lane.x) <= 4.5 * pitch).map(parentOf);
       return usable.length >= 3 && near.some(p => q.P - p > NEAR_BAND && near.filter(x => Math.abs(x - p) <= 2).length >= 2 &&
         offs.concat(allOffs).some(off => Math.abs(q.P - p - off) <= 3 + 0.05 * off));
     };
     const lanes = pre.map(q => {
-      const offs = q.ownOffsets || offsets || ownOffsets(q, prm.products);
+      let offs = q.ownOffsets || offsets || ownOffsets(q, prm.products);
+      // A parent chosen by hand that none of the row's product positions fit (the row learnt them
+      // from lanes whose parent was missed): the lane's own strongest products.
+      if (q.parentFixed && Math.abs(q.P - q.autoP) > SAME_BAND && offs.length && !offs.some(off => q.cands.some(c => Math.abs(c.off - off) <= offTol(off)))) offs = ownOffsets(q, prm.products);
       const l = analyzeLane(q, offs, n, r, img, prm);
       if (q.offPattern) l.flags.push('product positions differ from the row');
-      if (!q.ov.any && l.role === 'sample' && atProduct(q, offs)) l.flags.push('parent at a product position of the row');
+      if (l.role === 'sample' && atProduct(q, offs)) l.flags.push('parent at a product position of the row');
       return l;
     });
 
@@ -598,13 +604,12 @@
       autoMarkers.forEach(l => { l.role = 'sample'; l.flags.push('extra band not matching the cleavage products'); });
     }
     const samples = lanes.filter(l => l.role === 'sample');
-    const untouched = samples.filter(l => !l.edited);
     const brighter = samples.filter(l => l.flags.includes('cleavage product brighter than parent'));
-    if (untouched.length >= 3 && brighter.filter(l => !l.edited).length > untouched.length / 2) {
-      // Rare in a real row; usually the box includes wells or a band above the parents.
-      brighter.forEach(l => l.flags.push('check band assignment'));
-    }
-    return { region: r, pitch, half, offsets: offsets || [], shared: !!(offsets && offsets.length), lanes };
+    const brighterRow = ctx ? ctx.brighterRow : samples.length >= 3 && brighter.length > samples.length / 2;
+    // Rare in a real row; usually the box includes wells or a band above the parents.
+    if (brighterRow) brighter.forEach(l => l.flags.push('check band assignment'));
+    const context = { main: pre.main, P: pre.map(q => q.P), brighterRow };
+    return { region: r, pitch, half, offsets: offsets || [], shared: !!(offsets && offsets.length), lanes, context };
   }
 
   /**
@@ -826,7 +831,7 @@
       for (let i = Math.max(0, Math.round(lo)); i <= Math.min(n - 1, Math.round(hi)); i++) {
         if (!nearRemoved(i) && !taken(i, k) && (c < 0 || ps[i] > ps[c])) c = i;
       }
-      if ((ov.removed.length || reserved.length) && !(c > Math.round(lo) && c < Math.round(hi) && isLocalMax(ps, c))) {
+      if (ov.removed.length && !(c > Math.round(lo) && c < Math.round(hi) && isLocalMax(ps, c))) {
         // Next to a removed band the window maximum can be that band's tail: take the highest real peak instead.
         let best = -1;
         for (let i = Math.max(1, Math.round(lo) + 1); i < Math.min(n - 1, Math.round(hi)); i++) {
@@ -834,8 +839,9 @@
         }
         if (best > 0) c = best;
       }
-      // Next to a removed or hand-placed band, flat background passes as a local maximum: ask for a real peak.
-      const solid = !(ov.removed.length || reserved.length) || prominence(ps, c, Math.max(8, c - P)) >= Math.max(3 * noise, 0.015 * (ps[P] - minOf(ps)));
+      // Flat background or a noise ripple passes as a local maximum: a product must stand above the
+      // noise. The same test for every lane, so a hand edit that confirms a band changes nothing.
+      const solid = prominence(ps, c, Math.max(8, c - P)) >= noise;
       const found = c > P && c < n - 1 && isLocalMax(ps, c) && c > Math.round(lo) && c < Math.round(hi) && solid;
       prods.push({ y: found ? c : Math.min(n - 1, Math.round(P + off)), found });
     }
@@ -861,7 +867,8 @@
     if (manual) {
       valleys = q.lane.valleys.map(v => Math.min(n - 1, Math.max(0, Math.round(v - r.y0)))).sort((a, b) => a - b);
       flags.push('manual band boundaries');
-      if (bands.some((b, s) => b.kind >= 0 && !(valleys[s] < b.y && b.y < valleys[s + 1]))) flags.push('band boundary crosses a band');
+      const measured = b => b.kind === 0 || (b.kind > 0 && prods[b.kind - 1].found);   // not the place an undetected product was expected
+      if (bands.some((b, s) => measured(b) && !(valleys[s] < b.y && b.y < valleys[s + 1]))) flags.push('band boundary crosses a band');
     } else {
       if (q.lane.valleys) flags.push('manual band boundaries ignored: the number of bands changed');
       const firstGap = ys.length > 1 ? ys[1] - ys[0] : Math.max(6, Math.round(n * 0.15));
@@ -896,12 +903,13 @@
       }
     }
     prods.forEach((x, k) => {
-      if (!x.found && !manual) { areas[k + 1] = 0; flags.push('product ' + (k + 1) + ' not detected'); }
+      // No band, no area: also when the boundaries were set by hand.
+      if (!x.found) { areas[k + 1] = 0; flags.push('product ' + (k + 1) + ' not detected'); }
     });
 
     const heights = peaks.map((y, i) => ps[y] - (isNaN(baseline[y]) ? nodes[Math.min(i, nodes.length - 1)] : baseline[y]));
     const faint = prods.map((x, k) => x.found && !x.fixed && heights[k + 1] < prm.faintSNR * noise);
-    if (prods.length === 2 && !manual && !ov.any && prods[0].found !== prods[1].found && faint[0] !== faint[1]) {
+    if (prods.length === 2 && prods[0].found !== prods[1].found && faint[0] !== faint[1]) {
       // A single faint "product" without its partner is noise, as in an uncut control.
       const k = faint[0] ? 0 : 1;
       prods[k].found = false; faint[k] = false; areas[k + 1] = 0;
@@ -909,10 +917,12 @@
     }
     prods.forEach((x, k) => { if (faint[k]) flags.push('product ' + (k + 1) + ' faint'); });
     if (!offsets.length && !prods.some(x => x.found)) flags.push('no cleavage products found');
-    if (q.weakOffsets && prods.some((x, k) => x.found && !x.fixed && offsets[k] != null && q.weakOffsets.includes(offsets[k]))) flags.push('check band assignment');
+    // No products, yet a faint band above the parent: at high editing that band is the parent.
+    if (!prods.some(x => x.found) && q.faintP != null && q.faintP < P - NEAR_BAND && !nearRemoved(q.faintP)) flags.push('band above the parent');
+    if (q.weakOffsets && prods.some((x, k) => x.found && offsets[k] != null && q.weakOffsets.includes(offsets[k]))) flags.push('check band assignment');
     // Cleavage always yields both fragments: one without the other points to a non-specific band.
-    if (!manual && ((prods.length === 2 && prods[0].found !== prods[1].found) ||
-        (prm.products === 2 && prods.length === 1 && prods[0].found))) flags.push('only one cleavage product found');
+    if ((prods.length === 2 && prods[0].found !== prods[1].found) ||
+        (prm.products === 2 && prods.length === 1 && prods[0].found)) flags.push('only one cleavage product found');
     if (P !== argmax(pm, 0, n - 1)) flags.push('cleavage product brighter than parent');
     if (prm.products === 1 && offsets.length === 1 &&
         q.cands.some(c => c.off > offsets[0] + offTol(offsets[0]) && c.prom >= 0.1 * parentProm)) {
@@ -941,13 +951,14 @@
       }
       const isPeak = j => peaks.some(y => Math.abs(y - j) <= NEAR_BAND) || nearRemoved(j);
       // Look a little below the last measured band too: a real product can be pushed out of the range.
-      const lastY = Math.max(...peaks), tail = Math.min(n - 2, Math.round(lastY + 0.6 * (lastY - P)));
+      // With a product missing, the band it should have been may sit anywhere below: look to the end.
+      const lastY = Math.max(...peaks), tail = prods.some(x => !x.found) ? n - 2 : Math.min(n - 2, Math.round(lastY + 0.6 * (lastY - P)));
       for (let j = valleys[0] + 1; j <= Math.max(last - 1, tail); j++) {
         if (!isPeak(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.04 * hP)) { flags.push('unassigned band inside the measured range'); break; }
       }
       const ref = prominence(ps, argmax(ps, 0, n - 1), reach);
       for (let j = 1; j < P - NEAR_BAND; j++) {
-        if (!nearRemoved(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.05 * ref)) { flags.push('band above the parent'); break; }
+        if (!nearRemoved(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(3 * noise, 0.05 * ref)) { flags.push('band above the parent'); break; }
       }
       if (q.extraBand) flags.push('extra band not matching the cleavage products');
     }
@@ -1034,6 +1045,15 @@
       l.editing = editing(l.fcCorrected, prm.formula);
       if (prm.formula === 'single' && l.fcCorrected > 0.5) l.flags.push('fraction cleaved > 0.5: single-allele model invalid');
     }));
+    if (prm.smoothing > DEFAULTS.smoothing + 0.5) {
+      // Heavy smoothing merges band shoulders, and every other check looks at the same smoothed
+      // profile: compare with the default smoothing.
+      const ref = analyze(img, rows, Object.assign({}, prm, { smoothing: DEFAULTS.smoothing }), sig);
+      out.forEach((r, ri) => r.lanes.forEach((l, li) => {
+        const e = ref.rows[ri].lanes[li];
+        if (l.role === 'sample' && e && e.role === 'sample' && Math.abs(l.editing - e.editing) >= 2) l.flags.push('result depends on the smoothing');
+      }));
+    }
     return { rows: out, ncFc, ncCount: nc.length, ncSaturated };
   }
 

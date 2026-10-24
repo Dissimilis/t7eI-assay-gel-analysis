@@ -55,19 +55,74 @@ test('a hand edit changes only its own lane', () => {
     const g = t7Row(seed, { hard: seed % 2 === 0 }), auto = analyseRow(g.img, g.box);
     const k = r.int(0, auto.lanes.length - 1), l = auto.lanes[k], abs = y => y + l.y0;
     const cands = (l.candidates.length ? l.candidates : l.peaks).map(abs);
-    const kind = r.pick(['remove', 'parent', 'product', 'valleys', 'measure']);
+    const kind = r.pick(['remove', 'parent', 'product 1', 'product 2', 'valleys', 'measure']);
     const edit = kind === 'remove' ? { bands: { parent: null, products: [null, null], removed: [r.pick(cands)] } }
       : kind === 'parent' ? { bands: { parent: r.pick(cands), products: [null, null], removed: [] } }
-        : kind === 'product' ? { bands: { parent: null, products: [null, r.pick(cands)], removed: [] } }
-          : kind === 'valleys' ? { valleys: l.valleys.map((v, i) => abs(v) + (i === 1 ? 2 : 0)) }
-            : { role: 'sample' };
+        : kind === 'product 1' ? { bands: { parent: null, products: [r.pick(cands), null], removed: [] } }
+          : kind === 'product 2' ? { bands: { parent: null, products: [null, r.pick(cands)], removed: [] } }
+            : kind === 'valleys' ? { valleys: l.valleys.map((v, i) => abs(v) + (i === 1 ? 2 : 0)) }
+              : { role: 'sample' };
     const edited = analyseRow(g.img, g.box, i => (i === k ? edit : {}));
-    edited.lanes.forEach((x, i) => {
-      if (i === k) return;
-      const a = auto.lanes[i];
-      assert.deepEqual([x.role, x.editing, x.peaks, x.areas, x.flags], [a.role, a.editing, a.peaks, a.areas, a.flags], `seed ${seed}, ${kind} in lane ${k}, lane ${i}`);
+    const same = (x, a, what) => assert.deepEqual([x.role, x.editing, x.peaks, x.areas, x.flags], [a.role, a.editing, a.peaks, a.areas, a.flags], what);
+    edited.lanes.forEach((x, i) => { if (i !== k) same(x, auto.lanes[i], `seed ${seed}, ${kind} in lane ${k}, lane ${i}`); });
+    // A second edit elsewhere leaves the first edited lane as it was.
+    const k2 = (k + 1 + r.int(0, auto.lanes.length - 2)) % auto.lanes.length;
+    if (k2 !== k) {
+      const both = analyseRow(g.img, g.box, i => (i === k ? edit : i === k2 ? { role: 'sample' } : {}));
+      same(both.lanes[k], edited.lanes[k], `seed ${seed}, ${kind} in lane ${k} then a second edit in lane ${k2}`);
+    }
+  }
+});
+
+test('confirming the band the app chose changes nothing', () => {
+  for (let seed = 1; seed <= 60; seed++) {
+    const g = t7Row(seed, { hard: seed % 2 === 0 }), auto = analyseRow(g.img, g.box);
+    auto.lanes.forEach((l, k) => {
+      if (l.role !== 'sample') return;
+      const abs = y => y + l.y0, edits = { parent: { bands: { parent: abs(l.peaks[0]), products: [null, null], removed: [] } }, measure: { role: 'sample' } };
+      if (l.found[1]) edits['product 1'] = { bands: { parent: null, products: [abs(l.peaks[1]), null], removed: [] } };
+      if (l.found[2]) edits['product 2'] = { bands: { parent: null, products: [null, abs(l.peaks[2])], removed: [] } };
+      for (const [kind, edit] of Object.entries(edits)) {
+        const e = analyseRow(g.img, g.box, i => (i === k ? edit : {})).lanes[k];
+        assert.equal(e.editing, l.editing, `seed ${seed} lane ${k}: ${kind}`);
+        assert.equal(e.flags.some(T.isWarning), l.flags.some(T.isWarning), `seed ${seed} lane ${k}: ${kind} changes the warning [${l.flags}] -> [${e.flags}]`);
+      }
     });
   }
+});
+
+test('nudging a band boundary by one pixel keeps the lane warnings', () => {
+  for (let seed = 1; seed <= 80; seed++) {
+    const g = t7Row(seed, { hard: true }), auto = analyseRow(g.img, g.box);
+    auto.lanes.forEach((l, k) => {
+      if (l.role !== 'sample' || !l.flags.some(T.isWarning)) return;
+      const v = l.valleys.map(y => y + l.y0); v[0] += v[1] - v[0] > 2 ? 1 : 0;
+      const e = analyseRow(g.img, g.box, i => (i === k ? { valleys: v } : {})).lanes[k];
+      assert.ok(e.flags.some(T.isWarning), `seed ${seed} lane ${k}: [${l.flags}] -> [${e.flags}]`);
+    });
+  }
+});
+
+test('heavy smoothing rarely moves a value without a warning', () => {
+  let lanes = 0, silent = 0;
+  for (let seed = 1; seed <= 60; seed++) {
+    const g = t7Row(seed), row = analyseRow(g.img, g.box, null, { smoothing: 4 });
+    row.lanes.forEach((l, i) => { if (l.role !== 'sample') return; lanes++; if (Math.abs(l.editing - g.truth[i]) > 2.5 && !l.flags.some(T.isWarning)) silent++; });
+  }
+  assert.ok(silent <= 0.01 * lanes, `${silent} of ${lanes} lanes`);
+});
+
+test('regressions found in review: these lanes are right or warned', () => {
+  for (const [seed, lane, products] of [[2789, 3, 2], [2726, 2, 2]]) {
+    const g = t7Row(seed, { hard: true, products }), l = analyseRow(g.img, g.box, null, { products }).lanes[lane];
+    assert.ok(l.role !== 'sample' || Math.abs(l.editing - g.truth[lane]) <= 10 || l.flags.some(T.isWarning), `seed ${seed} lane ${lane}: ${l.editing.toFixed(1)} vs ${g.truth[lane].toFixed(1)} [${l.flags}]`);
+  }
+  // The true parent chosen by hand after the row learnt its product positions from misread lanes.
+  const g = t7Row(79, { hard: true }), auto = analyseRow(g.img, g.box);
+  const truthParent = g.lanes[2].bands[0][0];
+  const l = analyseRow(g.img, g.box, i => (i === 2 ? { bands: { parent: truthParent, products: [null, null], removed: [] } } : {})).lanes[2];
+  assert.ok(Math.abs(l.editing - g.truth[2]) <= 10 || l.flags.some(T.isWarning), `seed 79 lane 2 with the true parent: ${l.editing.toFixed(1)} vs ${g.truth[2].toFixed(1)} [${l.flags}]`);
+  assert.ok(auto.lanes.length > 2);
 });
 
 test('lane order does not change any result', () => {
