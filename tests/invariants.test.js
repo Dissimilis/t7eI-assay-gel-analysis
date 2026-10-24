@@ -101,9 +101,10 @@ test('boxes around one to three lanes find them, also on blurred images, and nor
   }
 });
 
-test('hard gels cut into boxes of one to three lanes rarely read more than 10 points off without a warning', () => {
+test('hard gels cut into boxes of one to three lanes never read more than 10 points off without a warning', () => {
   // Few neighbours to cross-check: a lone lane above 75% editing whose faint parent is only a
-  // shoulder, or an uncut lane with only a primer dimer, cannot be told apart from the image.
+  // shoulder, or an uncut lane with only a primer dimer, cannot be told apart from the image, so
+  // with one product such boxes warn on lanes reading under 20%.
   for (const products of [2, 1]) {
     let lanes = 0;
     const silent = [];
@@ -120,7 +121,7 @@ test('hard gels cut into boxes of one to three lanes rarely read more than 10 po
         });
       }
     }
-    assert.ok(silent.length <= 0.005 * lanes, `${products} products: ${silent.length} of ${lanes}:\n` + silent.join('\n'));
+    assert.deepEqual(silent, [], `${products} products, ${lanes} lanes`);
   }
 });
 

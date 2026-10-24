@@ -71,6 +71,7 @@ Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit c
 | edge | A band is cut by the box edge, so part of it is missing and the baseline is lifted. Draw the box a little larger. |
 | well? | The parent sits at the very top of the box, which usually means a well is inside the box. Start the box just above the parent bands. |
 | unassigned band | A band inside the measured range is neither the parent nor a product, so its signal may be counted. |
+| few lanes | One product and a box of three lanes or fewer, and the lane reads under 20%: the app cannot tell a cut lane from an uncut lane with a primer dimer, or an uncut lane from one cut above 75% whose parent is only a shoulder. |
 | band above | A band above the parent: often a faint parent at very high editing, or a well. Also set when the lane has even a faint band where nearby lanes have their parent or a band above it, or, without products, a band one product length above its parent. In boxes of one to three lanes any band above the parent that stands out of the noise counts. Check the band assignment. |
 | edited | Band boundaries were moved by hand (`manual band boundaries` in the export). |
 | edits dropped | Band boundaries set by hand no longer match the bands found, so the automatic ones were used. |
@@ -93,7 +94,7 @@ The engine was also compared with careful hand analysis in ImageJ of a real Invi
 `tests/invariants.test.js` checks rules that must hold on any gel, on seeded random synthetic rows (`tests/gels.js`) with all three backgrounds and both product counts:
 
 - **Normal gels** (bands at least six band widths apart, light noise, editing up to 70%): every sample lane reads within 2.5 points of the truth or carries a warning.
-- **Hard gels cut into boxes of one to three lanes** find every lane, and at most 0.5% of lanes read more than 10 points off without a warning.
+- **Hard gels cut into boxes of one to three lanes** find every lane, and no lane reads more than 10 points off without a warning.
 - **Hard gels** (bands four widths apart, more noise, a sloped background, primer dimers, wells inside the box, clipped bands, editing up to 85%): no lane is more than 10 points off without a warning. Smaller errors without a warning are rare (at most 1.5% of lanes off by more than 2.5 points), mostly the *Valley* background reading low where bands nearly touch.
 - **Small boxes** around one to three lanes find every lane, also on blurred, nearly noise-free images, and on normal gels read within 2.5 points or warn.
 - **Rows as imagers give them** (a smile across the row, lanes of uneven brightness and spacing, primer dimers, dark or light bands): every lane is found, and no lane is more than 10 points off without a warning.
@@ -103,7 +104,7 @@ The engine was also compared with careful hand analysis in ImageJ of a real Invi
 
 An end lane with a strong extra band of its own (for example a primer dimer only in that lane) is shown as a ladder, without a value. **Measure this lane** measures it as a sample.
 
-Boxes of one to three lanes have few other lanes to cross-check against. On hard gels with one product, about 0.3% of their lanes still read more than 10 points off without a warning: a lone lane above about 75% editing whose faint parent shows only as a shoulder on the product (no separate peak), or a lone uncut lane with only a primer dimer, which looks the same as a cut lane. In full rows the neighbours catch both.
+Boxes of one to three lanes have few other lanes to cross-check against. With one product, an uncut lane with only a primer dimer looks like a lane cut up to about 20%, and a lane cut above about 75% whose faint parent shows only as a shoulder on the product looks uncut; the image alone cannot tell them apart. In such boxes every lane reading under 20% carries the warning *few lanes*: check it against a full row or a sequencing result.
 
 ## Limitations of the assay
 

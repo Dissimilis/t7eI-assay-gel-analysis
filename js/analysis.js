@@ -50,7 +50,8 @@
     'band at the top of the box: a well?', 'unassigned band inside the measured range', 'band above the parent',
     'extra band not matching the cleavage products', 'check band assignment', 'only one cleavage product found',
     'removed band overlaps a measured band', 'bands overlap: result depends on the baseline', 'band boundary crosses a band',
-    'parent at a product position of the row', 'product positions differ from the row', 'result depends on the smoothing']);
+    'parent at a product position of the row', 'product positions differ from the row', 'result depends on the smoothing',
+    'one product and few lanes: bands not cross-checked']);
   function isWarning(flag) { return WARNINGS.includes(flag) || /invalid|second product visible/.test(flag); }
 
   // ---------------------------------------------------------------- images
@@ -670,6 +671,12 @@
     if (auto.length >= 3 && autoMarkers.length > auto.length / 2) {
       // Most lanes cannot be ladders: the extra band is shared (a primer dimer or second PCR product).
       autoMarkers.forEach(l => { l.role = 'sample'; l.flags.push('extra band not matching the cleavage products'); });
+    }
+    // One product and three lanes or fewer: an uncut lane with a primer dimer looks like a lane cut
+    // up to about 20%, and a lane cut above about 75% whose parent shows only as a shoulder looks
+    // uncut. With so few lanes the row cannot tell them apart, so lanes reading under 20% say so.
+    if (prm.products === 1 && usable.length <= 3) {
+      lanes.forEach(l => { if (l.role === 'sample' && editingGuschin(l.fc) < 20) l.flags.push('one product and few lanes: bands not cross-checked'); });
     }
     const samples = lanes.filter(l => l.role === 'sample');
     const brighter = samples.filter(l => l.flags.includes('cleavage product brighter than parent'));
