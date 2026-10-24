@@ -119,6 +119,8 @@ Tests need Node.js 22 or newer (`npm test` runs the same command):
 node --test "tests/*.test.js"
 ```
 
+The suite covers the engine on synthetic gels (`analysis.test.js`), rules checked on seeded random gels (`invariants.test.js`), the TIFF reader and the XLSX writer, and the app itself in headless Chrome (`browser.test.js`, skipped when no Chrome is found; set `CHROME_PATH` to point at one). Tests on real gels run only where the images are present in `reference/`, which is kept out of the repository: `reference-gels.test.js` checks known band positions, and `reference-snapshot.test.js` compares every lane with a saved snapshot, `reference/snapshot.json`. After a change that is meant to alter results, `T7E1_UPDATE_SNAPSHOT=1 npm test` writes a new snapshot.
+
 ## Files
 
 | Path | Contents |
@@ -131,7 +133,7 @@ node --test "tests/*.test.js"
 | `js/sample.js` | Synthetic sample gel with known values |
 | `css/` | Industry design system and app styles |
 | `fonts/` | Barlow and Barlow Condensed (SIL Open Font License) |
-| `tests/` | Node test suite and TIFF fixtures |
+| `tests/` | Node test suite, TIFF fixtures, the random-gel generator (`gels.js`) and the headless Chrome driver (`browser/`) |
 | `docs/` | Screenshot and example figure for this README |
 
 ## References

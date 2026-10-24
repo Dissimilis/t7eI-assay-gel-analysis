@@ -3,7 +3,7 @@
   'use strict';
 
   const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample, XLSX = window.T7EIXlsx;
-  const VERSION = '1.2.0';
+  const VERSION = '1.2.1';
   const STORE = 't7eI.params.v1';
   const $ = id => document.getElementById(id);
 
@@ -590,7 +590,7 @@
     const labelY = i => Math.max(PAD.t + 12, S.Y(p[i]) - 3);
     // Other detected peaks: grey dots, clickable to assign or remove.
     (r.candidates || []).forEach(i => {
-      if (r.peaks.some(pk => Math.abs(pk - i) <= 2) || (r.removed || []).some(j => Math.abs(j - i) <= 2)) return;
+      if (r.peaks.some(pk => Math.abs(pk - i) <= SAME) || (r.removed || []).some(j => Math.abs(j - i) <= SAME)) return;
       x.fillStyle = col.text; x.globalAlpha = 0.45;
       x.beginPath(); x.arc(S.X(i), labelY(i) - 4, 2.5, 0, 2 * Math.PI); x.fill();
     });

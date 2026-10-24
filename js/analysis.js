@@ -21,6 +21,9 @@
   const NEAR_BAND = 4;                                    // "next to" a band: no separate band fits here
   const offTol = off => 3 + 0.15 * off;                   // a band matches a product offset within this
   const reachOf = n => Math.max(10, Math.round(n / 4));   // how far prominence looks for the surrounding floor
+  // Grouping lanes' offsets chains from one to the next, so each step is held tighter than offTol:
+  // with offTol the clusters of neighbouring products merge (tested on random and real gels).
+  const chainTol = off => 3 + 0.1 * off;
 
   // Overlapping bands: flagged when % editing on the lane's baseline and on a straight baseline
   // differ by at least `points` and by a factor of `ratio`, or by `large` points in any case.
@@ -360,7 +363,7 @@
     const clusters = [];
     for (const it of all) {
       const c = clusters[clusters.length - 1];
-      if (c && it.off - c.items[c.items.length - 1] <= 3 + 0.1 * it.off) { c.items.push(it.off); c.lanes.add(it.lane); c.prom += it.prom; }
+      if (c && it.off - c.items[c.items.length - 1] <= chainTol(it.off)) { c.items.push(it.off); c.lanes.add(it.lane); c.prom += it.prom; }
       else clusters.push({ items: [it.off], lanes: new Set([it.lane]), prom: it.prom });
     }
     const lanes = lists.length;
@@ -571,7 +574,8 @@
     // With fewer than three lanes there is no majority to vote: each lane uses its own strongest products.
     // At high editing the parent fades and a product can be taken for it: that lane's "parent" then
     // sits a product offset below a parent position nearby lanes share. Only nearby lanes count,
-    // since a gel's smile moves parents across the row.
+    // since a gel's smile moves parents across the row. Parents of one amplicon line up closely, so
+    // this test is held tighter than offTol: within 2 px of each other, 3 px + 5% of the offset.
     const allOffs = patterns.flat();
     const atProduct = (q, offs) => {
       const near = usable.filter(o => o !== q && Math.abs(o.lane.x - q.lane.x) <= 4.5 * pitch).map(o => o.P);
@@ -777,7 +781,7 @@
     // An undetected product only marks where it was expected; when that spot is another band it gets no segment.
     const collides = (y, i) => peaks.some((o, j) => j !== i && Math.abs(o - y) <= SAME_BAND) || nearRemoved(y);
     const bands = peaks.map((y, i) => ({ y, kind: i })).filter(b => b.kind === 0 || prods[b.kind - 1].found || (!prods[b.kind - 1].slotOnly && !collides(b.y, b.kind)))
-      .concat(ov.removed.filter(y => y > P - above && y < lowest + below && !peaks.some((p, i) => (i === 0 || prods[i - 1].found) && Math.abs(p - y) <= 2)).map(y => ({ y, kind: -1 })))
+      .concat(ov.removed.filter(y => y > P - above && y < lowest + below && !peaks.some((p, i) => (i === 0 || prods[i - 1].found) && Math.abs(p - y) <= SAME_BAND)).map(y => ({ y, kind: -1 })))
       .sort((a, b) => a.y - b.y || a.kind - b.kind);
     const ys = bands.map(b => b.y);
     const removedIn = bands.filter(b => b.kind < 0).map(b => b.y);
