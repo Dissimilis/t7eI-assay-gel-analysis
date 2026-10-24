@@ -94,6 +94,7 @@ The engine was also compared with careful hand analysis in ImageJ of a real Invi
 
 - **Normal gels** (bands at least six band widths apart, light noise, editing up to 70%): every sample lane reads within 2.5 points of the truth or carries a warning.
 - **Hard gels** (bands four widths apart, more noise, a sloped background, primer dimers, wells inside the box, clipped bands, editing up to 85%): no lane is more than 10 points off without a warning. Smaller errors without a warning are rare (at most 1.5% of lanes off by more than 2.5 points), mostly the *Valley* background reading low where bands nearly touch.
+- **Rows as imagers give them** (a smile across the row, lanes of uneven brightness and spacing, primer dimers, dark or light bands): every lane is found, and no lane is more than 10 points off without a warning.
 - **Hand edits** change only their own lane: the row's shared decisions and every other lane come from the same row with all edits taken out, and a second edit leaves the first edited lane as it was. Confirming the band the app already chose changes neither the value nor the warnings, and moving a boundary by hand keeps a lane's warnings.
 - **Heavy smoothing** (4 px) leaves at most 1% of lanes more than 2.5 points off without a warning.
 - **Lane order** changes no result, random boxes and settings never crash, and the same input always gives the same result.

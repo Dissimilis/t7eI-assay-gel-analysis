@@ -151,6 +151,19 @@ test('high editing: a product brighter than the parent does not become the paren
   });
 });
 
+test('lanes alternating bright and dim are all found', () => {
+  // The autocorrelation of such a row peaks at twice the lane spacing.
+  const w = 960, h = 140, g = new Float32Array(w * h).fill(200), xs = [108, 215, 330, 439, 553, 657, 771, 880];
+  xs.forEach((xc, i) => {
+    const amp = i % 2 ? 35 : 110;
+    for (let x = xc - 36; x <= xc + 36; x++) for (let y = 0; y < h; y++) g[y * w + x] -= amp * (0.7 * Math.exp(-((y - 35) ** 2) / 32) + 0.3 * Math.exp(-((y - 70) ** 2) / 32));
+  });
+  const img = T.makeImage(g, w, h), box = { x0: 54, x1: 942, y0: 10, y1: 130 };
+  const d = T.detectLanes(T.signalImage(img, 'dark'), img, box);
+  assert.equal(d.xs.length, xs.length, `found ${d.xs}`);
+  d.xs.forEach((x, i) => assert.ok(Math.abs(x - xs[i]) <= 3, `lane ${i}: ${x} vs ${xs[i]}`));
+});
+
 test('two-lane row: the ladder does not set the product positions', () => {
   const img = laneGel([[200, 22]], { ladder: 100 });
   const row = analyseBox(img, { x0: 50, x1: 250, y0: 5, y1: 135 });

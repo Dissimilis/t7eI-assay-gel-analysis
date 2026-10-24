@@ -286,24 +286,32 @@
     const thr = Math.max(0.05 * dmax, 5 * noise);
     const cand = [];
     for (let i = 1; i < d.length - 1; i++) if (d[i] > thr && isLocalMax(d, i)) cand.push(i);
-    const minSep = pitch ? 0.6 * pitch : 8;
     cand.sort((a, b) => d[b] - d[a]);
-    const lanes = [];
-    for (const c of cand) {
-      // A flat-topped band can have several maxima; keep one per half-maximum interval.
-      if (lanes.some(k => (c >= k.l && c <= k.r) || Math.abs(k.c - c) < minSep)) continue;
-      const half = d[c] / 2;
-      let l = c, rr = c;
-      while (l > 0 && d[l - 1] > half) l--;
-      while (rr < d.length - 1 && d[rr + 1] > half) rr++;
-      lanes.push({ c: Math.round((l + rr) / 2), l, r: rr });
-    }
-    const xs = lanes.map(k => k.c).sort((a, b) => a - b).filter((x, i, a) => i === 0 || x - a[i - 1] >= 4);
+    const pick = minSep => {
+      const out = [];
+      for (const c of cand) {
+        // A flat-topped band can have several maxima; keep one per half-maximum interval.
+        if (out.some(k => (c >= k.l && c <= k.r) || Math.abs(k.c - c) < minSep)) continue;
+        const half = d[c] / 2;
+        let l = c, rr = c;
+        while (l > 0 && d[l - 1] > half) l--;
+        while (rr < d.length - 1 && d[rr + 1] > half) rr++;
+        out.push({ c: Math.round((l + rr) / 2), l, r: rr });
+      }
+      return out;
+    };
+    const centres = ls => ls.map(k => k.c).sort((a, b) => a - b).filter((x, i, a) => i === 0 || x - a[i - 1] >= 4);
+    let lanes = pick(pitch ? 0.6 * pitch : 8), xs = centres(lanes);
     // The autocorrelation needs several lanes; check it against the spacing of neighbouring lanes.
     if (xs.length >= 2) {
       const gaps = xs.slice(1).map((x, i) => x - xs[i]);
       const gmin = Math.min(...gaps);
       const adjacent = median(gaps.filter(g => g <= 1.3 * gmin));
+      if (pitch && pitch > 1.25 * adjacent) {
+        // Lanes alternating bright and dim make the autocorrelation pick twice the spacing, and the
+        // separation it sets hides the dim lanes: pick again with the spacing of neighbouring lanes.
+        lanes = pick(0.6 * adjacent); xs = centres(lanes);
+      }
       if (!pitch || pitch < 0.8 * adjacent || pitch > 1.25 * adjacent) pitch = adjacent;
     } else if (xs.length === 1) {
       const width = lanes[0].r - lanes[0].l + 1;

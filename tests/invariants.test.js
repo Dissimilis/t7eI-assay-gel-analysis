@@ -4,7 +4,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const T = require('../js/analysis.js');
-const { rng, t7Row, analyseRow } = require('./gels.js');
+const { rng, t7Row, wildRow, analyseRow } = require('./gels.js');
 
 const MODES = [];
 for (const background of ['valley', 'blend', 'envelope']) for (const products of [2, 1]) MODES.push({ background, products });
@@ -43,6 +43,28 @@ for (const m of MODES) {
     // Smaller misses without a warning stay rare: mostly Valley where bands nearly touch.
     const small = silentErrors(range(1, 150), opts, 2.5);
     assert.ok(small.out.length <= 0.015 * small.lanes,`${small.out.length} of ${small.lanes} lanes off by more than 2.5 points without a warning`);
+  });
+}
+
+for (const light of [false, true]) {
+  test(`rows with a smile and uneven lanes: all lanes found, none more than 10 points off without a warning (${light ? 'light' : 'dark'} bands)`, () => {
+    for (const products of [2, 1]) {
+      let lanes = 0, small = 0;
+      for (let seed = 1; seed <= 180; seed++) {
+        const g = wildRow(seed, { products, light }), pol = T.detectPolarity(g.img), sig = T.signalImage(g.img, pol);
+        const d = T.detectLanes(sig, g.img, g.box);
+        assert.equal(d.xs.length, g.truth.length, `seed ${seed}: lanes found`);
+        const row = T.analyze(g.img, [Object.assign({}, g.box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null })) })], { polarity: pol, products }, sig).rows[0];
+        row.lanes.forEach((l, i) => {
+          lanes++;
+          if (l.role !== 'sample' || l.flags.some(T.isWarning)) return;
+          const err = Math.abs(l.editing - g.truth[i]);
+          assert.ok(err <= 10, `seed ${seed} lane ${i}, ${products} products: ${l.editing.toFixed(1)}% vs ${g.truth[i].toFixed(1)}% [${l.flags}]`);
+          if (err > 2.5) small++;
+        });
+      }
+      assert.ok(small <= 0.015 * lanes, `${products} products: ${small} of ${lanes} lanes off by more than 2.5 points without a warning`);
+    }
   });
 }
 

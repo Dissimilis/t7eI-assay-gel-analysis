@@ -67,6 +67,47 @@ function t7Row(seed, opts) {
   return { img: T.makeImage(g, w, h), box, truth, lanes, products, sd, dimer: dimerLanes ? dimerY : null, features };
 }
 
+/**
+ * A row as imagers give it: a smile across the row, lanes of uneven brightness and spacing, optional
+ * primer dimers, and dark bands on a light background or (opts.light) the inverse.
+ */
+function wildRow(seed, opts) {
+  const r = rng(seed * 7919 + 13), o = Object.assign({}, opts), products = o.products || 2;
+  const nLanes = r.int(3, 12), pitch = r.int(70, 110), sd = r.range(3, 5);
+  const parentY = r.int(25, 40), off1 = r.int(Math.ceil(5 * sd), 40), off2 = off1 + r.int(Math.ceil(5 * sd), 45);
+  const smile = r() < 0.6 ? r.range(-8, 8) : 0, uneven = r() < 0.6;
+  const dimer = r() < 0.3, dimerY = parentY + (products === 2 ? off2 : off1) + r.int(14, 24);
+  const h = dimerY + r.int(20, 30) + Math.ceil(Math.abs(smile)), w = Math.round(pitch * (nLanes + 1.5));
+  const bg = r.int(190, 225), amp = r.range(50, 160), noise = r.range(0, 2.5);
+  const lanes = [], truth = [];
+  let x = pitch;
+  for (let i = 0; i < nLanes; i++) {
+    const ed = r() < 0.15 ? 0 : r.range(3, 80), fc = 1 - (1 - ed / 100) ** 2, share = r.range(0.55, 0.75);
+    const u = nLanes > 1 ? 2 * i / (nLanes - 1) - 1 : 0, dy = smile * (1 - u * u);
+    const a = amp * (uneven ? r.range(0.5, 1.5) : 1);
+    const bands = products === 2 ? [[parentY + dy, 1 - fc], [parentY + off1 + dy, fc * share], [parentY + off2 + dy, fc * (1 - share)]]
+      : [[parentY + dy, 1 - fc], [parentY + off1 + dy, fc]];
+    if (dimer && r() < 0.6) bands.push([dimerY + dy, r.range(0.05, 0.25)]);
+    lanes.push({ x: Math.round(x), bands, a });
+    truth.push(ed);
+    x += pitch * r.range(0.92, 1.08);
+  }
+  const g = new Float32Array(w * h).fill(bg), halfW = Math.round(0.33 * pitch);
+  lanes.forEach(({ x, bands, a }) => {
+    for (let y = 0; y < h; y++) {
+      let v = 0;
+      bands.forEach(([yc, m]) => { v += a * m * Math.exp(-((y - yc) ** 2) / (2 * sd * sd)); });
+      for (let xx = x - halfW; xx <= x + halfW; xx++) g[y * w + xx] -= v;
+    }
+  });
+  for (let i = 0; i < g.length; i++) {
+    const v = Math.max(0, Math.min(255, Math.round(g[i] + (r() - 0.5) * 2 * noise)));
+    g[i] = o.light ? 255 - v : v;
+  }
+  const box = { x0: Math.round(pitch / 2), x1: Math.round(x - pitch / 2), y0: Math.max(1, parentY - r.int(12, 20) - Math.ceil(Math.max(0, -smile))), y1: h - 2 };
+  return { img: T.makeImage(g, w, h), box, truth, products };
+}
+
 /** Lanes found in the box, with optional per-lane overrides, analysed with the given parameters. */
 function analyseRow(img, box, laneOf, params) {
   const sig = T.signalImage(img, 'dark');
@@ -75,4 +116,4 @@ function analyseRow(img, box, laneOf, params) {
   return T.analyze(img, [Object.assign({}, box, { pitch: d.pitch, lanes })], Object.assign({ polarity: 'dark' }, params)).rows[0];
 }
 
-module.exports = { rng, t7Row, analyseRow };
+module.exports = { rng, t7Row, wildRow, analyseRow };
