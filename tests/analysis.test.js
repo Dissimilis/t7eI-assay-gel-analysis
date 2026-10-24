@@ -196,7 +196,7 @@ test('low editing next to a strong parent: the faint lower product is still foun
 });
 
 // Release scenarios from the final reviews: a wrong number must never be silent.
-const WARNING = /saturated|cut by|top of the box|unassigned|above the parent|extra band|check band|only one|second product/;
+const WARNING = { test: f => T.isWarning(f) };   // the app's own list of warning flags
 
 function bandGel(lanes, opts) {
   const o = Object.assign({ w: 900, h: 170, amp: 80 }, opts);

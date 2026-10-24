@@ -3,7 +3,7 @@
   'use strict';
 
   const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample, XLSX = window.T7EIXlsx;
-  const VERSION = '1.1.1';
+  const VERSION = '1.2.0';
   const STORE = 't7eI.params.v1';
   const $ = id => document.getElementById(id);
 
@@ -70,11 +70,7 @@
       bg: cssVar('--color-bg', '#f2f2f3'), warn: cssVar('--color-warn', '#a8552e')
     };
   }
-  const WARN = ['parent saturated', 'product saturated', 'weak lane', 'band cut by the box edge', 'band at the top of the box: a well?',
-    'unassigned band inside the measured range', 'band above the parent', 'extra band not matching the cleavage products',
-    'check band assignment', 'only one cleavage product found', 'removed band overlaps a measured band',
-    'bands overlap: result depends on the baseline', 'band boundary crosses a band'];
-  function isWarn(f) { return WARN.includes(f) || /invalid|second product visible/.test(f); }
+  const isWarn = T.isWarning;
   const MAX_PIXELS = 40e6;
 
   function signal() {
@@ -675,7 +671,8 @@
       'manual band boundaries': 'edited', 'only one cleavage product found': 'one product', 'second product visible: set two products': 'second product?',
       'cleavage product brighter than parent': 'brighter product', 'manual band assignment': 'bands set',
       'removed band overlaps a measured band': 'overlap', 'product positions differ from the row': 'other pattern',
-      'bands overlap: result depends on the baseline': 'bands overlap', 'band boundary crosses a band': 'boundary crosses band', 'manual band boundaries ignored: the number of bands changed': 'edits dropped' })[f] ||
+      'bands overlap: result depends on the baseline': 'bands overlap', 'band boundary crosses a band': 'boundary crosses band',
+      'parent at a product position of the row': 'parent at product', 'manual band boundaries ignored: the number of bands changed': 'edits dropped' })[f] ||
       f.replace('product ', 'P').replace(' not detected', ' missing').replace(/fraction cleaved > 0.5.*/, 'f > 0.5');
   }
 

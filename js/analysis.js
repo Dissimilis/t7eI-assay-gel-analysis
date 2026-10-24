@@ -17,8 +17,8 @@
   'use strict';
 
   // Overlapping bands: flagged when % editing on the lane's baseline and on a straight baseline
-  // differ by at least `points` and by a factor of `ratio`.
-  const OVERLAP = Object.freeze({ points: 4, ratio: 1.75 });
+  // differ by at least `points` and by a factor of `ratio`, or by `large` points in any case.
+  const OVERLAP = Object.freeze({ points: 4, ratio: 1.75, large: 8 });
 
   const DEFAULTS = Object.freeze({
     polarity: 'dark',      // 'dark' = dark bands on a light background, 'light' = the opposite
@@ -34,6 +34,14 @@
   });
 
   const ROLES = ['sample', 'nc', 'marker', 'excluded'];
+
+  // Flags that say the lane's value should not be trusted as it stands; the rest are information.
+  const WARNINGS = Object.freeze(['parent saturated', 'product saturated', 'weak lane', 'band cut by the box edge',
+    'band at the top of the box: a well?', 'unassigned band inside the measured range', 'band above the parent',
+    'extra band not matching the cleavage products', 'check band assignment', 'only one cleavage product found',
+    'removed band overlaps a measured band', 'bands overlap: result depends on the baseline', 'band boundary crosses a band',
+    'parent at a product position of the row', 'product positions differ from the row']);
+  function isWarning(flag) { return WARNINGS.includes(flag) || /invalid|second product visible/.test(flag); }
 
   // ---------------------------------------------------------------- images
 
@@ -396,12 +404,31 @@
 
   // ---------------------------------------------------------------- analysis
 
+  /** A lane the user changed by hand: band choices, boundaries, or "measure this lane". */
+  function isEdited(lane) {
+    const b = lane.bands;
+    return lane.role === 'sample' || !!(lane.valleys && lane.valleys.length) ||
+      !!(b && (b.parent != null || (b.products || []).some(v => v != null) || (b.removed || []).length));
+  }
+
   /**
-   * Analyse one row. `row` = { x0, y0, x1, y1, lanes: [{ x, role, valleys }] }
-   * where `role` null means automatic and `valleys` (absolute y) is an optional
-   * manual override.
+   * Analyse one row. `row` = { x0, y0, x1, y1, lanes: [{ x, role, valleys, bands }] }
+   * where `role` null means automatic and `valleys` / `bands` (absolute y) are manual overrides.
+   * A hand edit changes only its own lane: the row's shared decisions and every untouched lane
+   * come from the same row with all edits taken out.
    */
   function analyzeRow(sig, img, row, params) {
+    const edited = row.lanes.map(isEdited);
+    if (!edited.some(Boolean)) return measureRow(sig, img, row, params);
+    const plain = lane => ({ x: lane.x, role: lane.role === 'sample' ? null : lane.role, label: lane.label });
+    const auto = measureRow(sig, img, Object.assign({}, row, { lanes: row.lanes.map(plain) }), params);
+    const res = measureRow(sig, img, row, params);
+    res.lanes = res.lanes.map((l, i) => (edited[i] ? l : auto.lanes[i]));
+    res.offsets = auto.offsets; res.shared = auto.shared;
+    return res;
+  }
+
+  function measureRow(sig, img, row, params) {
     const prm = Object.assign({}, DEFAULTS, params);
     const r = normRegion(row, img);
     const n = r.y1 - r.y0;
@@ -436,10 +463,16 @@
       for (let j = Math.ceil(well); j < autoP - 4; j++) {
         if (isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.02 * ref)) { q.faintP = j; q.faintCands = productCandidates(ps, j, noise); break; }
       }
-      // A ladder has more strong bands than parent plus two products; keep it out of the vote.
-      // Judged on the automatic bands, like the vote, so a removal does not take a lane in or out of it.
-      q.ladderLike = !lane.role && strongPeaks(ps, autoP, n).length >= 4;
+      q.strong = strongPeaks(ps, autoP, n);
       return q;
+    });
+    // Band positions most lanes share (parents, products, a well, a primer dimer) are not a ladder's
+    // signature. A ladder has more strong bands than parent plus two products, most of them its own;
+    // keep it out of the vote. Judged on the automatic bands, like the vote.
+    const sharedAt = j => pre.length >= 3 && pre.filter(o => o.strong.some(k => Math.abs(k - j) <= 3)).length >= Math.max(3, Math.ceil(pre.length / 2));
+    pre.forEach(q => {
+      q.sharedAt = sharedAt;
+      q.ladderLike = !q.lane.role && q.strong.length >= 4 && q.strong.filter(j => !sharedAt(j)).length >= 3;
     });
     const xMin = Math.min(...pre.map(q => q.lane.x)), xMax = Math.max(...pre.map(q => q.lane.x));
     pre.forEach(q => { q.isEnd = q.lane.x === xMin || q.lane.x === xMax; q.rowLanes = pre.length; });
@@ -530,17 +563,28 @@
       pre.forEach(q => { q.offPattern = q.patternK != null && q.patternK !== main; });
     }
     // With fewer than three lanes there is no majority to vote: each lane uses its own strongest products.
+    // At high editing the parent fades and a product can be taken for it: that lane's "parent" then
+    // sits a product offset below a parent position nearby lanes share. Only nearby lanes count,
+    // since a gel's smile moves parents across the row.
+    const allOffs = patterns.flat();
+    const atProduct = (q, offs) => {
+      const near = usable.filter(o => o !== q && Math.abs(o.lane.x - q.lane.x) <= 4.5 * pitch).map(o => o.P);
+      return usable.length >= 3 && near.some(p => q.P - p > 4 && near.filter(x => Math.abs(x - p) <= 2).length >= 2 &&
+        offs.concat(allOffs).some(off => Math.abs(q.P - p - off) <= 3 + 0.05 * off));
+    };
     const lanes = pre.map(q => {
-      const l = analyzeLane(q, q.ownOffsets || offsets || ownOffsets(q, prm.products), n, r, img, prm);
+      const offs = q.ownOffsets || offsets || ownOffsets(q, prm.products);
+      const l = analyzeLane(q, offs, n, r, img, prm);
       if (q.offPattern) l.flags.push('product positions differ from the row');
+      if (!q.ov.any && l.role === 'sample' && atProduct(q, offs)) l.flags.push('parent at a product position of the row');
       return l;
     });
 
     const auto = lanes.filter(l => l.autoRole);
-    const autoMarkers = auto.filter(l => l.autoMarker && !l.ladderLike);
+    const autoMarkers = auto.filter(l => l.role === 'marker' && !l.ladderLike);
     if (auto.length >= 3 && autoMarkers.length > auto.length / 2) {
       // Most lanes cannot be ladders: the extra band is shared (a primer dimer or second PCR product).
-      autoMarkers.filter(l => l.role === 'marker').forEach(l => { l.role = 'sample'; l.flags.push('extra band not matching the cleavage products'); });
+      autoMarkers.forEach(l => { l.role = 'sample'; l.flags.push('extra band not matching the cleavage products'); });
     }
     const samples = lanes.filter(l => l.role === 'sample');
     const untouched = samples.filter(l => !l.edited);
@@ -828,33 +872,20 @@
       if (q.extraBand) flags.push('extra band not matching the cleavage products');
     }
     let role = q.lane.role;
-    // The role the lane would have without hand edits: the row's ladder vote counts this one.
-    let autoMarker = false;
-    if (!role) {
-      const Pa = ov.any && q.autoP != null ? q.autoP : P, promA = ps[Pa] - minOf(ps);
-      const matchesA = j => Math.abs(j - Pa) <= 4 || offsets.some(off => Math.abs(j - Pa - off) <= 3 + 0.15 * off) ||
-        (prm.products === 1 && offsets.length === 1 && j - Pa > offsets[0]);
-      if (q.ladderLike) autoMarker = q.isEnd || q.rowLanes < 3;
-      // fitsPattern describes the edited bands; without the edits only the unmatched bands decide.
-      else for (let j = 1; (q.isEnd || q.rowLanes < 3) && (ov.any || !q.fitsPattern) && j < n - 1; j++) {
-        if (isLocalMax(ps, j) && !matchesA(j) && prominence(ps, j, Math.max(10, Math.round(n / 4))) >= 0.25 * promA) { autoMarker = true; break; }
-      }
-    }
     if (!role && ov.any) role = 'sample';   // bands chosen by hand: the user treats this lane as a sample
-    if (!role && q.ladderLike) {
-      // Ladders sit at the ends of a row; an interior lane with extra strong bands is a sample with an extra band.
-      if (q.isEnd || q.rowLanes < 3) role = 'marker';
-      else { role = 'sample'; flags.push('extra band not matching the cleavage products'); }
-    }
     if (!role) {
-      role = 'sample';
-      const matches = j => Math.abs(j - P) <= 4 || offsets.some(off => Math.abs(j - P - off) <= 3 + 0.15 * off) ||
+      // Ladders sit at the ends of a row, or make up a row of one or two lanes. A ladder-like lane
+      // inside the row is a sample with an extra band. An end lane is a ladder when strong bands that
+      // neither its parent, its products nor a band most lanes share explain are left over.
+      const endish = q.isEnd || q.rowLanes < 3;
+      const explained = j => Math.abs(j - P) <= 4 || q.sharedAt(j) || offsets.some(off => Math.abs(j - P - off) <= 3 + 0.15 * off) ||
         (prm.products === 1 && offsets.length === 1 && j - P > offsets[0]);   // the second product, not a ladder band
-      // Ladders sit at the ends of a row: interior lanes are samples unless ladder-like.
-      for (let j = 1; (q.isEnd || q.rowLanes < 3) && !q.fitsPattern && j < n - 1; j++) {
-        if (!isLocalMax(ps, j) || matches(j)) continue;
-        if (prominence(ps, j, Math.max(10, Math.round(n / 4))) >= 0.25 * parentProm) { role = 'marker'; break; }
+      let left = 0;
+      for (let j = 1; endish && !q.ladderLike && !q.fitsPattern && j < n - 1; j++) {
+        if (isLocalMax(ps, j) && !explained(j) && prominence(ps, j, Math.max(10, Math.round(n / 4))) >= 0.25 * parentProm) left++;
       }
+      if (q.ladderLike && !endish) flags.push('extra band not matching the cleavage products');
+      role = (q.ladderLike ? endish : left > 0) ? 'marker' : 'sample';
     }
 
     const total = areas.reduce((s, v) => s + v, 0);
@@ -875,7 +906,8 @@
       }
       const altTotal = alt.reduce((s, v) => s + v, 0);
       const e1 = editingGuschin(fc), e2 = altTotal > 0 ? editingGuschin((altTotal - alt[0]) / altTotal) : e1;
-      if (Math.abs(e1 - e2) >= OVERLAP.points && Math.max(e1, e2) >= OVERLAP.ratio * Math.min(e1, e2)) flags.push('bands overlap: result depends on the baseline');
+      const d = Math.abs(e1 - e2);
+      if (d >= OVERLAP.large || (d >= OVERLAP.points && Math.max(e1, e2) >= OVERLAP.ratio * Math.min(e1, e2))) flags.push('bands overlap: result depends on the baseline');
     }
 
     return {
@@ -883,7 +915,7 @@
       profile: ps, corrected: removedIn.length ? pm : null, baseline, valleys, peaks, found: [true].concat(prods.map(x => x.found)), segKinds,
       fixed: [q.parentFixed].concat(prods.map(x => !!x.fixed)), removed: ov.removed.slice(), candidates: peakList(ps, noise),
       areas, heights, fc, role, flags, noise, saturated: sat, parentProm,
-      autoRole: !q.lane.role, ladderLike: !!q.ladderLike, autoMarker, edited: !!ov.any,
+      autoRole: !q.lane.role, ladderLike: !!q.ladderLike, edited: !!ov.any,
       editing: NaN, fcCorrected: fc
     };
   }
@@ -916,7 +948,7 @@
   }
 
   return {
-    DEFAULTS, ROLES,
+    DEFAULTS, ROLES, WARNINGS, isWarning,
     rgbaToGray, makeImage, detectPolarity, signalImage,
     smooth, opening, noiseSigma, median, estimatePitch,
     detectLanes, laneProfile, analyzeRow, analyze,
