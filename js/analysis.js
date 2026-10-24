@@ -16,6 +16,10 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  // Overlapping bands: flagged when % editing on the lane's baseline and on a straight baseline
+  // differ by at least `points` and by a factor of `ratio`.
+  const OVERLAP = Object.freeze({ points: 4, ratio: 1.75 });
+
   const DEFAULTS = Object.freeze({
     polarity: 'dark',      // 'dark' = dark bands on a light background, 'light' = the opposite
     laneWidth: 0.5,        // measured strip width as a fraction of the lane pitch
@@ -425,6 +429,7 @@
       // The row votes with each lane's automatic bands, so a band removed in one lane does not move the others.
       const autoTop = argmax(ps, 0, n - 1), autoP = parentIndex(ps, autoTop, n, noise);
       q.voteCands = productCandidates(ps, autoP, noise);
+      q.autoP = autoP;
       // The uppermost faint band below the well zone: the parent when editing is high enough that it
       // falls under the cut parentIndex uses (about 65% and above; found up to about 87%).
       const reach = Math.max(10, Math.round(n / 4)), ref = prominence(ps, autoTop, reach), well = Math.max(3, 0.08 * n);
@@ -436,7 +441,8 @@
       q.ladderLike = !lane.role && strongPeaks(ps, autoP, n).length >= 4;
       return q;
     });
-    pre.forEach((q, i) => { q.isEnd = i === 0 || i === pre.length - 1; q.rowLanes = pre.length; });
+    const xMin = Math.min(...pre.map(q => q.lane.x)), xMax = Math.max(...pre.map(q => q.lane.x));
+    pre.forEach(q => { q.isEnd = q.lane.x === xMin || q.lane.x === xMax; q.rowLanes = pre.length; });
     const autoPre = pre.filter(q => !q.lane.role);
     const ladderLike = autoPre.filter(q => q.ladderLike);
     if (autoPre.length >= 3 && ladderLike.length > autoPre.length / 2) {
@@ -473,7 +479,7 @@
       // group seen in at least two lanes becomes a product pattern besides the row consensus.
       const groups = [];
       usable.forEach(q => {
-        const h = q.ps[q.P] - minOf(q.ps);
+        const h = q.ps[q.autoP] - minOf(q.ps);
         const own = q.voteCands.filter(c => c.prom >= 0.05 * h).sort((a, b) => b.prom - a.prom).slice(0, prm.products).map(c => c.off).sort((a, b) => a - b);
         if (own.length < prm.products) return;
         const g = groups.find(x => samePattern(x.ref, own));
@@ -487,7 +493,8 @@
     if (patterns.length) {
       // A further band position shared by half the lanes, not part of any pattern, is not a cleavage product.
       const all = consensusOffsets(usable.map(q => q.voteCands), 8, Math.max(3, Math.ceil(usable.length / 2)));
-      if (all.some(o => !patterns.some(pat => pat.some(e => Math.abs(e - o) <= tolOf(Math.max(e, o)))))) usable.forEach(q => { q.extraBand = true; });
+      const unmatched = all.filter(o => !patterns.some(pat => pat.some(e => Math.abs(e - o) <= tolOf(Math.max(e, o)))));
+      usable.forEach(q => { if (unmatched.some(o => q.voteCands.some(c => Math.abs(c.off - o) <= tolOf(o)))) q.extraBand = true; });
       // Each lane takes the pattern and parent that explain its bands best. The parent is the band from
       // which the products sit at the pattern's offsets: this finds a faint parent above about 65%
       // editing and passes over a well or stray band above it. Ladders sit at the ends of a row, so
@@ -716,6 +723,7 @@
       valleys = q.lane.valleys.map(v => Math.min(n - 1, Math.max(0, Math.round(v - r.y0)))).sort((a, b) => a - b);
       flags.push('manual band boundaries');
     } else {
+      if (q.lane.valleys) flags.push('manual band boundaries ignored: the number of bands changed');
       const firstGap = ys.length > 1 ? ys[1] - ys[0] : Math.max(6, Math.round(n * 0.15));
       valleys = [argmin(pm, ys[0] - firstGap, ys[0])];
       for (let i = 0; i < ys.length - 1; i++) valleys.push(argmin(pm, ys[i], ys[i + 1]));
@@ -823,6 +831,23 @@
     const total = areas.reduce((s, v) => s + v, 0);
     const fc = total > 0 ? (total - areas[0]) / total : 0;
     if (fc === 0 && offsets.length && role === 'sample') flags.push('no cleavage');
+    if (fc > 0 && role === 'sample') {
+      // Bands that run into each other: products on the tail of the parent lose most of their area
+      // to a baseline through the valleys. Measure again on a straight line between the outer
+      // boundaries; when the two disagree strongly, the result depends on the baseline.
+      const v0 = valleys[0], vN = valleys[valleys.length - 1];
+      const outer = i => (vN > v0 ? pm[v0] + (pm[vN] - pm[v0]) * (i - v0) / (vN - v0) : pm[v0]);
+      const alt = areas.map(() => 0);
+      for (let s = 0; s < valleys.length - 1; s++) {
+        const end = s === valleys.length - 2 ? valleys[s + 1] : valleys[s + 1] - 1;
+        let sum = 0;
+        for (let i = valleys[s]; i <= end; i++) sum += Math.max(0, pm[i] - outer(i));
+        if (bands[s].kind >= 0 && areas[bands[s].kind] > 0) alt[bands[s].kind] = sum;
+      }
+      const altTotal = alt.reduce((s, v) => s + v, 0);
+      const e1 = editingGuschin(fc), e2 = altTotal > 0 ? editingGuschin((altTotal - alt[0]) / altTotal) : e1;
+      if (Math.abs(e1 - e2) >= OVERLAP.points && Math.max(e1, e2) >= OVERLAP.ratio * Math.min(e1, e2)) flags.push('bands overlap: result depends on the baseline');
+    }
 
     return {
       x: q.lane.x, a: q.a, b: q.b, y0: r.y0,

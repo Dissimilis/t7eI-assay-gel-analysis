@@ -13,7 +13,7 @@ test('column names', () => {
 
 test('workbook is a valid zip with the expected parts and escaped cells', () => {
   const data = X.build([
-    { name: 'Results', rows: [['Lane', '% editing', 'Flags'], [1, 21.75, 'a & <b> "c"'], [2, NaN, '=1+1']], widths: [6, 10, 30] },
+    { name: 'Results', rows: [['Lane', '% editing', 'Flags'], [1, 21.75, 'a & <b> "c"'], [2, NaN, '=1+1'], [3, 4, 'sample_x0041_']], widths: [6, 10, 30] },
     { name: 'Settings', rows: [['Formula', 'Guschin']] }
   ]);
   const dv = new DataView(data.buffer, data.byteOffset, data.byteLength);
@@ -38,5 +38,6 @@ test('workbook is a valid zip with the expected parts and escaped cells', () => 
   assert.match(text, /<v>21\.75<\/v>/);
   assert.match(text, /a &amp; &lt;b&gt; &quot;c&quot;/);
   assert.match(text, /<t xml:space="preserve">=1\+1<\/t>/, 'text starting with = stays text');
+  assert.match(text, /sample_x005F_x0041_/, 'a literal _xHHHH_ is not read as an escaped character');
   assert.doesNotMatch(text, /NaN/);
 });

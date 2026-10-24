@@ -3,7 +3,7 @@
   'use strict';
 
   const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample, XLSX = window.T7EIXlsx;
-  const VERSION = '1.1.0';
+  const VERSION = '1.1.1';
   const STORE = 't7eI.params.v1';
   const $ = id => document.getElementById(id);
 
@@ -72,7 +72,8 @@
   }
   const WARN = ['parent saturated', 'product saturated', 'weak lane', 'band cut by the box edge', 'band at the top of the box: a well?',
     'unassigned band inside the measured range', 'band above the parent', 'extra band not matching the cleavage products',
-    'check band assignment', 'only one cleavage product found', 'removed band overlaps a measured band'];
+    'check band assignment', 'only one cleavage product found', 'removed band overlaps a measured band',
+    'bands overlap: result depends on the baseline'];
   function isWarn(f) { return WARN.includes(f) || /invalid|second product visible/.test(f); }
   const MAX_PIXELS = 40e6;
 
@@ -255,6 +256,13 @@
       if (near) { used.add(near); lane.role = near.role; lane.label = near.label; if (keepBoundaries) lane.valleys = near.valleys; }
       return lane;
     });
+  }
+
+  /** Find the lanes of every row again (new polarity); hand-made band choices do not carry over. */
+  function redetectAll() {
+    const edited = state.rows.some(row => row.lanes.some(l => l.bands || l.valleys));
+    state.rows.forEach(row => redetectRow(row, false));
+    if (edited) setMessage('Lanes found again for the new polarity; band choices made by hand were cleared.');
   }
 
   function redetect(ri) {
@@ -657,7 +665,8 @@
       'extra band not matching the cleavage products': 'extra band', 'check band assignment': 'check bands', 'no cleavage products found': 'no products',
       'manual band boundaries': 'edited', 'only one cleavage product found': 'one product', 'second product visible: set two products': 'second product?',
       'cleavage product brighter than parent': 'brighter product', 'manual band assignment': 'bands set',
-      'removed band overlaps a measured band': 'overlap', 'product positions differ from the row': 'other pattern' })[f] ||
+      'removed band overlaps a measured band': 'overlap', 'product positions differ from the row': 'other pattern',
+      'bands overlap: result depends on the baseline': 'bands overlap', 'manual band boundaries ignored: the number of bands changed': 'edits dropped' })[f] ||
       f.replace('product ', 'P').replace(' not detected', ' missing').replace(/fraction cleaved > 0.5.*/, 'f > 0.5');
   }
 
@@ -836,7 +845,7 @@
       const v = e.target.value;
       state.params[key] = key === 'products' ? Number(v) : v;
       saveParams();
-      if (key === 'polarity' && state.img) state.rows.forEach(row => redetectRow(row, false));
+      if (key === 'polarity' && state.img) redetectAll();
       // Manual boundaries are tied to the number of bands, so a new product count resets them.
       // Band choices and boundaries depend on the number of bands: a new product count starts them afresh.
       if (key === 'products') state.rows.forEach(row => row.lanes.forEach(l => { l.valleys = null; l.bands = null; l.undo = []; }));
@@ -849,7 +858,7 @@
   els.resetParams.addEventListener('click', () => {
     const oldPol = state.params.polarity, oldProducts = state.params.products;
     state.params = Object.assign({}, T.DEFAULTS, { polarity: state.img ? T.detectPolarity(state.img) : oldPol });
-    if (state.img && state.params.polarity !== oldPol) state.rows.forEach(row => redetectRow(row, false));
+    if (state.img && state.params.polarity !== oldPol) redetectAll();
     if (state.params.products !== oldProducts) state.rows.forEach(row => row.lanes.forEach(l => { l.valleys = null; l.bands = null; l.undo = []; }));
     saveParams();
     recompute();
@@ -881,10 +890,11 @@
   }
 
   function bandRole(r, i) {
-    const k = r.peaks.findIndex(pk => Math.abs(pk - i) <= 3);
+    if ((r.removed || []).some(j => Math.abs(j - i) <= 3)) return 'removed';
+    const k = r.peaks.findIndex((pk, m) => Math.abs(pk - i) <= 3 && (m === 0 || !r.found || r.found[m]));
     if (k === 0) return 'parent';
     if (k > 0) return 'p' + k;
-    return (r.removed || []).some(j => Math.abs(j - i) <= 3) ? 'removed' : 'none';
+    return 'none';
   }
 
   /** Remember a lane's band choices and boundaries so the next edit can be undone. */
@@ -1098,7 +1108,7 @@
         quant ? fixed(r.fc, 4) : '', quant ? fixed(r.editing, 2) : '',
         csvCell(r.flags.join('; '))].join(','));
     });
-    download(new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' }), baseName() + '-t7eI.csv');
+    download(new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'], { type: 'text/csv' }), baseName() + '-t7eI.csv');
   }
 
   function exportPng() {

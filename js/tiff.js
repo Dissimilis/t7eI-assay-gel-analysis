@@ -216,7 +216,7 @@
       for (let v = max; v >= 0.15 * max && v > min; v -= quantum) if (hist[v] && pile(v, 1)) { clipTop = v; break; }
       if (pile(min, -1)) clipBottom = min;
       const ceiling = clipTop != null ? clipTop : max;
-      bits = [10, 12, 14, 16].find(b => ceiling <= 2 ** b - 1);
+      bits = [8, 10, 12, 14, 16].find(b => ceiling <= 2 ** b - 1);   // 8: 8-bit values in a 16-bit file
       if (quantum >= 256 || used % 257 === 0 && Array.from({ length: 256 }, (_, v) => hist[v * 257]).reduce((a, c) => a + c, 0) === total) {
         stored8 = true;   // 8-bit data scaled into a 16-bit file: only 256 levels are real
       }

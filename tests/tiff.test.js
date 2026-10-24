@@ -75,3 +75,23 @@ test('a clipped 12-bit band in a left-aligned 16-bit file counts as saturated', 
   assert.ok(img.gray[15 * w + 40] >= img.clipHigh, 'pile at the ceiling is clipped');
   assert.ok(img.gray[30 * w + 100] < img.clipHigh, 'ordinary pixels are not');
 });
+
+test('8-bit values in a 16-bit file keep their 8-bit scale', async () => {
+  // Uncompressed 16-bit grey, values 0-255 only: background 200 with a darker band.
+  const w = 40, h = 30, data = 8 + 2 + 9 * 12 + 4;
+  const entries = [[256, 3, 1, w], [257, 3, 1, h], [258, 3, 1, 16], [259, 3, 1, 1], [262, 3, 1, 1],
+    [273, 4, 1, data], [277, 3, 1, 1], [278, 3, 1, h], [279, 4, 1, w * h * 2]];
+  const b = Buffer.alloc(data + w * h * 2);
+  b.write('II', 0, 'latin1'); b.writeUInt16LE(42, 2); b.writeUInt32LE(8, 4);
+  b.writeUInt16LE(entries.length, 8);
+  entries.forEach(([tag, type, count, value], i) => {
+    const o = 10 + i * 12;
+    b.writeUInt16LE(tag, o); b.writeUInt16LE(type, o + 2); b.writeUInt32LE(count, o + 4);
+    if (type === 3) b.writeUInt16LE(value, o + 8); else b.writeUInt32LE(value, o + 8);
+  });
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) b.writeUInt16LE(y >= 10 && y < 15 ? 90 : 200, data + 2 * (y * w + x));
+  const img = await TIFF.decode(b.buffer.slice(b.byteOffset, b.byteOffset + b.length));
+  assert.equal(img.bits, 8);
+  assert.equal(img.storedBits, 16);
+  assert.ok(Math.abs(img.gray[0] - 200) < 1e-3 && Math.abs(img.gray[12 * w] - 90) < 1e-3, `grey ${img.gray[0]}, ${img.gray[12 * w]}`);
+});

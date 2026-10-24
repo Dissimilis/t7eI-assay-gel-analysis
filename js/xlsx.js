@@ -60,7 +60,7 @@
     return out;
   }
 
-  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+  const esc = s => String(s).replace(/_(x[0-9a-fA-F]{4}_)/g, '_x005F_$1').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '');
 
   function colName(i) {

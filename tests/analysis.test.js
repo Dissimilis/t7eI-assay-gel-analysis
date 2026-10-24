@@ -124,7 +124,7 @@ function laneGel(lanes, opts) {
   const draw = (xc, bands) => {
     for (let x = xc - o.width; x <= xc + o.width; x++) for (let y = 0; y < o.h; y++) {
       let v = 0;
-      bands.forEach(([yc, m]) => { v += o.amp * m * Math.exp(-((y - yc) ** 2) / 32); });
+      bands.forEach(([yc, m, sd = 4]) => { v += o.amp * m * Math.exp(-((y - yc) ** 2) / (2 * sd * sd)); });
       g[y * o.w + x] -= v;
     }
   };
@@ -204,7 +204,7 @@ function bandGel(lanes, opts) {
   lanes.forEach(({ x, bands }) => {
     for (let xx = x - 17; xx <= x + 17; xx++) for (let y = 0; y < o.h; y++) {
       let v = 0;
-      bands.forEach(([yc, m]) => { v += o.amp * m * Math.exp(-((y - yc) ** 2) / 32); });
+      bands.forEach(([yc, m, sd = 4]) => { v += o.amp * m * Math.exp(-((y - yc) ** 2) / (2 * sd * sd)); });
       g[y * o.w + xx] -= v;
     }
   });
@@ -440,4 +440,42 @@ test('a removed band where a product was expected is still left out', () => {
   const row = analyseWith(bandGel(lanes, { w: 650, h: 190 }), { x0: 0, x1: 650, y0: 5, y1: 185 }, i => (i === 3 ? { parent: null, products: [null, null], removed: [90] } : null));
   const l = row.lanes[3], ref = row.lanes[2];
   assert.ok(Math.abs(l.areas[2] - ref.areas[2]) < 0.05 * ref.areas[2], `product 2 area ${l.areas[2]} vs ${ref.areas[2]}`);
+});
+
+test('bands that run into each other are flagged when the result depends on the baseline', () => {
+  const broad = [[40, 0.64, 6], [60, 0.24, 6], [80, 0.12, 6]];
+  const lanes = [60, 160, 260, 360, 460, 560].map(x => ({ x, bands: broad }));
+  const row = analyseBox(bandGel(lanes, { w: 650, h: 220 }), { x0: 0, x1: 650, y0: 5, y1: 210 });
+  assert.ok(row.lanes[2].flags.includes('bands overlap: result depends on the baseline'), `flags [${row.lanes[2].flags.join('; ')}]`);
+  // Separated bands are not flagged.
+  const clean = analyseBox(bandGel(fourLanes(20), { w: 500 }), { x0: 0, x1: 500, y0: 5, y1: 135 });
+  clean.lanes.forEach((l, i) => assert.ok(!l.flags.some(f => /overlap/.test(f)), 'clean lane ' + i));
+});
+
+test('an extra band is flagged only in the lanes that carry it', () => {
+  const lanes = [60, 160, 260, 360, 460, 560, 660, 760].map((x, i) => ({ x, bands: t7Bands(20, i % 2 ? [] : [[130, 0.06]]) }));
+  const row = analyseBox(bandGel(lanes, { w: 840 }), { x0: 0, x1: 840, y0: 5, y1: 160 });
+  row.lanes.forEach((l, i) => {
+    assert.ok(Math.abs(l.editing - 20) <= 2, `lane ${i}: ${l.editing}`);
+    assert.equal(l.flags.includes('extra band not matching the cleavage products'), i % 2 === 0, `lane ${i}: [${l.flags.join('; ')}]`);
+  });
+});
+
+test('a parent removed in one lane does not move the grouping of another', () => {
+  const A = [[40, 0.64], [70, 0.24], [105, 0.12]], B = [[40, 0.3], [90, 1], [140, 0.03]], C = [[40, 0.36], [90, 0.64 * 2 / 3], [140, 0.64 / 3]];
+  const lanes = [A, A, A, B, C, A].map((bands, i) => ({ x: 60 + 100 * i, bands }));
+  const img = bandGel(lanes, { w: 650, h: 220 }), box = { x0: 0, x1: 650, y0: 5, y1: 210 };
+  const auto = analyseWith(img, box, () => null), edited = analyseWith(img, box, i => (i === 3 ? { parent: null, products: [null, null], removed: [40] } : null));
+  edited.lanes.forEach((l, i) => { if (i !== 3) assert.deepEqual([l.editing, l.peaks], [auto.lanes[i].editing, auto.lanes[i].peaks], 'lane ' + i); });
+});
+
+test('lane order does not change which lanes are ends of the row', () => {
+  const ladder = [[20, 0.5], [45, 0.5], [70, 0.5], [95, 0.5], [120, 0.5]];
+  const lanes = [{ x: 60, bands: ladder }].concat([160, 260, 360].map(x => ({ x, bands: t7Bands(20) })));
+  const img = bandGel(lanes, { w: 450, h: 150 }), box = { x0: 0, x1: 450, y0: 5, y1: 140 };
+  const run = xs => T.analyze(img, [Object.assign({}, box, { pitch: 100, lanes: xs.map(x => ({ x, role: null })) })], { polarity: 'dark' }).rows[0];
+  const sorted = run([60, 160, 260, 360]), shuffled = run([160, 60, 260, 360]);
+  const byX = r => Object.fromEntries(r.lanes.map(l => [l.x, l.role + ' ' + l.editing]));
+  assert.deepEqual(byX(shuffled), byX(sorted));
+  assert.equal(sorted.lanes[0].role, 'marker');
 });
