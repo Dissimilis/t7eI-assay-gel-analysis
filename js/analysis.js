@@ -622,8 +622,8 @@
       return false;
     };
     const aboveOf = q => {
-      const ref = prominence(q.ps, argmax(q.ps, 0, n - 1), reach), out = [];
-      for (let j = well; j < q.P - NEAR_BAND; j++) if (isLocalMax(q.ps, j) && prominence(q.ps, j, reach) >= Math.max(3 * q.noise, 0.05 * ref)) out.push(j);
+      const out = [];
+      for (let j = well; j < q.P - NEAR_BAND; j++) if (isLocalMax(q.ps, j) && prominence(q.ps, j, reach) >= 2 * q.noise) out.push(j);
       return out;
     };
     // Positions found in two lanes or more; each lane gives a list of positions.
@@ -644,8 +644,13 @@
     })();
     // Parent positions under a strong band above, in a nearby lane: lanes with their parent there too
     // share the doubt even when their own faint parent shows only as a shoulder.
-    const doubted = ctx ? ctx.doubted : pre.map(q => (usable.length < 3 ? [] : nearOf(q).filter(o => aboveOf(o).some(j =>
-      prominence(o.ps, j, reach) >= 0.15 * prominence(o.ps, o.P, reach))).map(o => o.P)));
+    // So are parent positions where two nearby lanes show any band above.
+    const doubted = ctx ? ctx.doubted : pre.map(q => {
+      if (usable.length < 3) return [];
+      const near = nearOf(q), withAbove = near.filter(o => aboveOf(o).length);
+      return near.filter(o => aboveOf(o).some(j => prominence(o.ps, j, reach) >= 0.1 * prominence(o.ps, o.P, reach))).map(o => o.P)
+        .concat(withAbove.filter(o => withAbove.filter(w => Math.abs(w.P - o.P) <= SAME_BAND).length >= 2).map(o => o.P));
+    });
     const lanes = pre.map((q, i) => {
       let offs = q.ownOffsets || offsets || ownOffsets(q, prm.products);
       // A parent chosen by hand that none of the row's product positions fit (the row learnt them
@@ -671,6 +676,14 @@
       if (l.role !== 'sample' || l.flags.includes('parent at a product position of the row') || l.flags.includes('band above the parent')) return;
       const same = pre.filter((o, j) => j !== i && atProd[j] != null && Math.abs(o.lane.x - q.lane.x) <= 4.5 * pitch && Math.abs(atProd[j] - q.P) <= SAME_BAND);
       if (same.length >= 2) l.flags.push('parent at a product position of the row');
+    });
+    // Two nearby lanes with the same parent position that warn of a band above it: so does this lane
+    // when it reads under 20%, as a lane far cut whose faint parent was missed would.
+    const aboveAt = ctx ? ctx.aboveAt : lanes.map((l, i) => (l.flags.includes('band above the parent') ? pre[i].P : null));
+    lanes.forEach((l, i) => {
+      const q = pre[i];
+      if (l.role !== 'sample' || l.flags.includes('band above the parent') || editingGuschin(l.fc) >= 20) return;
+      if (pre.filter((o, j) => j !== i && aboveAt[j] != null && Math.abs(o.lane.x - q.lane.x) <= 4.5 * pitch && Math.abs(aboveAt[j] - q.P) <= SAME_BAND).length >= 2) l.flags.push('band above the parent');
     });
     // A nearby lane with its parent well above this one and a clear band where this lane has its
     // parent: this lane's parent is that lane's product, or a band below a faint parent.
@@ -754,7 +767,7 @@
     const brighterRow = ctx ? ctx.brighterRow : samples.length >= 3 && brighter.length > samples.length / 2;
     // Rare in a real row; usually the box includes wells or a band above the parents.
     if (brighterRow) brighter.forEach(l => { if (!l.flags.includes('check band assignment')) l.flags.push('check band assignment'); });
-    const context = { main: pre.main, P: pre.map(q => q.P), brighterRow, upper, lower, nearParents, doubted, split, atProd, below };
+    const context = { main: pre.main, P: pre.map(q => q.P), brighterRow, upper, lower, nearParents, doubted, split, atProd, below, aboveAt };
     return { region: r, pitch, half, offsets: offsets || [], shared: !!(offsets && offsets.length), lanes, context };
   }
 
@@ -1106,7 +1119,9 @@
       // Without products, any band above the well zone that stands out of the noise may be a faint
       // parent at very high editing: the lane then reads 0% instead of over 80%. A row of one or two
       // lanes has no neighbours to show that parent, so there any band above the noise counts.
-      const few = q.rowLanes <= 3, faintBar = (few ? 0.5 : 3) * noise;
+      // The slope-based noise grows with the flanks of strong bands; a short row uses the smaller
+      // curvature-based estimate as well.
+      const few = q.rowLanes <= 3, faintBar = few ? 0.5 * Math.min(noise, curvatureNoise(q.p)) : 2 * noise;
       for (let j = 1; j < P - NEAR_BAND && !flags.includes('band above the parent'); j++) {
         if (nearRemoved(j) || !isLocalMax(ps, j)) continue;
         const pr = prominence(ps, j, reach);
