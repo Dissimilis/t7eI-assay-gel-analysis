@@ -94,6 +94,7 @@ The engine was also compared with careful hand analysis in ImageJ of a real Invi
 
 - **Normal gels** (bands at least six band widths apart, light noise, editing up to 70%): every sample lane reads within 2.5 points of the truth or carries a warning.
 - **Hard gels** (bands four widths apart, more noise, a sloped background, primer dimers, wells inside the box, clipped bands, editing up to 85%): no lane is more than 10 points off without a warning. Smaller errors without a warning are rare (at most 1.5% of lanes off by more than 2.5 points), mostly the *Valley* background reading low where bands nearly touch.
+- **Small boxes** around one to three lanes find every lane, also on blurred, nearly noise-free images, and on normal gels read within 2.5 points or warn.
 - **Rows as imagers give them** (a smile across the row, lanes of uneven brightness and spacing, primer dimers, dark or light bands): every lane is found, and no lane is more than 10 points off without a warning.
 - **Hand edits** change only their own lane: the row's shared decisions and every other lane come from the same row with all edits taken out, and a second edit leaves the first edited lane as it was. Confirming the band the app already chose changes neither the value nor the warnings, and moving a boundary by hand keeps a lane's warnings.
 - **Heavy smoothing** (4 px) leaves at most 1% of lanes more than 2.5 points off without a warning.
@@ -101,7 +102,7 @@ The engine was also compared with careful hand analysis in ImageJ of a real Invi
 
 An end lane with a strong extra band of its own (for example a primer dimer only in that lane) is shown as a ladder, without a value. **Measure this lane** measures it as a sample.
 
-Rows of one or two lanes have no other lanes to cross-check against, so fewer problems are flagged there; a box around one or two lanes of a nearly noise-free (smoothed or upscaled) export can also find the wrong number of lanes, which shows on the image. With a primer dimer in most lanes and only one cut lane in the row, the row can take the dimer for the product, and an uncut lane with only the dimer then reads about 10% without a warning; with two cut lanes or more the row warns. A parent fainter than the noise at very high editing can still be missed when the neighbours do not show it either.
+Rows of one to three lanes have few other lanes to cross-check against, so fewer problems are flagged there: on hard gels with one product, a lane above about 75% editing whose faint parent shows only as a shoulder on the product can read near 0% without a warning (in about 2–6% of such lanes). With a primer dimer in most lanes and only one cut lane in the row, the row can take the dimer for the product, and an uncut lane with only the dimer then reads about 10% without a warning; with two cut lanes or more the row warns. A parent fainter than the noise at very high editing can still be missed when the neighbours do not show it either.
 
 ## Limitations of the assay
 

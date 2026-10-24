@@ -68,6 +68,39 @@ for (const light of [false, true]) {
   });
 }
 
+/** Gaussian blur, as an upscaled or smoothed export gives: nearly noise-free, flat-topped lanes. */
+function blurred(img, sd) {
+  const { w, h } = img, g = img.gray, k = [];
+  for (let i = -3 * sd; i <= 3 * sd; i++) k.push(Math.exp(-(i * i) / (2 * sd * sd)));
+  const ks = k.reduce((a, b) => a + b), tmp = new Float32Array(w * h), out = new Float32Array(w * h);
+  const at = (v, n) => Math.min(n - 1, Math.max(0, v));
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) tmp[y * w + x] = k.reduce((s, kv, j) => s + kv * g[y * w + at(x + j - 3 * sd, w)], 0) / ks;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out[y * w + x] = Math.round(k.reduce((s, kv, j) => s + kv * tmp[at(y + j - 3 * sd, h) * w + x], 0) / ks);
+  return T.makeImage(out, w, h);
+}
+
+test('boxes around one to three lanes find them, also on blurred images, and normal gels read right', () => {
+  for (let seed = 1; seed <= 100; seed++) {
+    for (const hard of [false, true]) {
+      const g = t7Row(seed, { hard }), pitch = g.lanes[1].x - g.lanes[0].x;
+      for (const img of [g.img, blurred(g.img, 2)]) {
+        const sig = T.signalImage(img, 'dark');
+        for (const k of [1, 2, 3]) {
+          if (g.lanes.length < k) continue;
+          const st = seed % (g.lanes.length - k + 1);
+          const box = { x0: Math.round(g.lanes[st].x - pitch / 2), x1: Math.round(g.lanes[st + k - 1].x + pitch / 2), y0: g.box.y0, y1: g.box.y1 };
+          const d = T.detectLanes(sig, img, box);
+          assert.equal(d.xs.length, k, `seed ${seed}${hard ? ' hard' : ''}${img === g.img ? '' : ' blurred'}, ${k} lanes: found ${d.xs}`);
+          if (hard || img !== g.img) continue;
+          const row = T.analyze(img, [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null })) })], { polarity: 'dark' }, sig).rows[0];
+          row.lanes.forEach((l, i) => assert.ok(Math.abs(l.editing - g.truth[st + i]) <= 2.5 || l.flags.some(T.isWarning),
+            `seed ${seed}, ${k} lanes, lane ${i}: ${l.editing.toFixed(1)} vs ${g.truth[st + i].toFixed(1)} [${l.flags}]`));
+        }
+      }
+    }
+  }
+});
+
 test('a hand edit changes only its own lane', () => {
   const r = rng(99);
   for (let seed = 1; seed <= 80; seed++) {

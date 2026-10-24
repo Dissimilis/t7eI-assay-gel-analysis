@@ -276,10 +276,10 @@
     const d = new Float32Array(p.length);
     let dmax = 0;
     for (let i = 0; i < p.length; i++) { d[i] = p[i] - base[i]; if (d[i] > dmax) dmax = d[i]; }
-    const noise = noiseSigma(raw);
-    if (dmax < 5 * noise) {
-      // The opening radius was too small to remove a band that fills most of the box.
-      const mn = Math.min(...p);
+    const noise = noiseSigma(raw), mn = Math.min(...p), range = Math.max(...p) - mn;
+    if (dmax < 5 * noise || dmax < 0.3 * range) {
+      // The opening radius was too small to remove a band that fills most of the box, or lanes with
+      // flat tops wider than it (a spacing misread from one or two lanes): only ripples were left.
       dmax = 0;
       for (let i = 0; i < p.length; i++) { d[i] = p[i] - mn; if (d[i] > dmax) dmax = d[i]; }
     }
@@ -517,10 +517,14 @@
         const extra = consensusOffsets(lists, 8, 2).filter(o => !offsets.some(e => Math.abs(e - o) <= offTol(Math.max(e, o))));
         offsets = offsets.concat(extra).slice(0, prm.products).sort((a, b) => a - b);
       }
-      if (!offsets.length) {
-        // Nothing shared at all: use the strongest candidates of the most cleaved-looking lane.
-        const best = usable.slice().sort((a, b) => sumProm(b.voteCands) - sumProm(a.voteCands))[0];
-        offsets = best.voteCands.slice().sort((a, b) => b.prom - a.prom).slice(0, prm.products).map(c => c.off).sort((a, b) => a - b);
+      if (offsets.length < prm.products) {
+        // Still short (a row with one cut lane): complete it from the strongest further bands of the
+        // most cleaved-looking lane, preferring a lane that shows all the products.
+        const all = q => q.voteCands.length >= prm.products ? 1 : 0;
+        const best = usable.slice().sort((a, b) => all(b) - all(a) || sumProm(b.voteCands) - sumProm(a.voteCands))[0];
+        const more = best.voteCands.filter(c => !offsets.some(e => Math.abs(e - c.off) <= offTol(Math.max(e, c.off))))
+          .sort((a, b) => b.prom - a.prom).slice(0, prm.products - offsets.length).map(c => c.off);
+        offsets = offsets.concat(more).sort((a, b) => a - b);
       }
     }
     const tolOf = offTol;
@@ -1014,9 +1018,13 @@
       for (let j = valleys[0] + 1; j <= Math.max(last - 1, tail); j++) {
         if (!isPeak(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.04 * hP)) { flags.push('unassigned band inside the measured range'); break; }
       }
-      const ref = prominence(ps, argmax(ps, 0, n - 1), reach);
-      for (let j = 1; j < P - NEAR_BAND; j++) {
-        if (!nearRemoved(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(3 * noise, 0.05 * ref)) { flags.push('band above the parent'); break; }
+      const ref = prominence(ps, argmax(ps, 0, n - 1), reach), none = !prods.some(x => x.found), well = Math.max(3, 0.08 * n);
+      for (let j = 1; j < P - NEAR_BAND && !flags.includes('band above the parent'); j++) {
+        if (nearRemoved(j) || !isLocalMax(ps, j)) continue;
+        // Without products, any band above the well zone that stands out of the noise may be a faint
+        // parent at very high editing: the lane then reads 0% instead of over 80%.
+        const pr = prominence(ps, j, reach);
+        if (pr >= Math.max(3 * noise, 0.05 * ref) || (none && j >= well && pr >= 3 * noise)) flags.push('band above the parent');
       }
       if (q.extraBand) flags.push('extra band not matching the cleavage products');
     }
