@@ -26,8 +26,9 @@
   const chainTol = off => 3 + 0.1 * off;
 
   // Overlapping bands: flagged when % editing on the lane's baseline and on a straight baseline
-  // differ by at least `points` and by a factor of `ratio`, or by `large` points in any case.
-  const OVERLAP = Object.freeze({ points: 4, ratio: 1.75, large: 8 });
+  // differ by at least `points` and by a factor of `ratio`, or by `large` points in any case, or when
+  // a band fit differs from the lane's value by `fit` points.
+  const OVERLAP = Object.freeze({ points: 4, ratio: 1.75, large: 8, fit: 3 });
 
   const DEFAULTS = Object.freeze({
     polarity: 'dark',      // 'dark' = dark bands on a light background, 'light' = the opposite
@@ -679,6 +680,75 @@
    * Profile with removed bands taken out: each is modelled as a Gaussian with its own height above
    * the local floor and a width from its cleaner (narrower) half-maximum flank, then subtracted.
    */
+  /** Solve the small dense system A x = b (Gaussian elimination with partial pivoting); null if singular. */
+  function solveSmall(A, b) {
+    const n = b.length, M = A.map((r, i) => r.concat([b[i]]));
+    for (let c = 0; c < n; c++) {
+      let p = c;
+      for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+      [M[c], M[p]] = [M[p], M[c]];
+      if (Math.abs(M[c][c]) < 1e-12) return null;
+      for (let r = c + 1; r < n; r++) { const f = M[r][c] / M[c][c]; for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+    }
+    const x = new Array(n).fill(0);
+    for (let r = n - 1; r >= 0; r--) { let s = M[r][n]; for (let k = r + 1; k < n; k++) s -= M[r][k] * x[k]; x[r] = s / M[r][r]; }
+    return x;
+  }
+
+  /**
+   * Areas of the bands at `centers`, fitted on p[y0..y1] as a straight baseline plus one Gaussian per
+   * band (Levenberg-Marquardt). Centres may move 3 px; widths stay between 0.8 px and 4 x `sd0`.
+   */
+  function fitBandAreas(p, y0, y1, centers, sd0) {
+    const ys = [];
+    for (let y = y0; y <= y1; y++) ys.push(y);
+    const lo = Math.min(p[y0], p[y1]), nb = centers.length;
+    let x = [lo, 0];
+    centers.forEach(c => { x.push(Math.max(1e-3, p[c] - lo), c, sd0); });
+    const clamp = v => {
+      for (let k = 0; k < nb; k++) {
+        const i = 2 + 3 * k;
+        v[i] = Math.max(0, v[i]);
+        v[i + 1] = Math.min(centers[k] + 3, Math.max(centers[k] - 3, v[i + 1]));
+        v[i + 2] = Math.min(4 * sd0, Math.max(0.8, v[i + 2]));
+      }
+      return v;
+    };
+    const model = (v, y) => {
+      let s = v[0] + v[1] * (y - y0);
+      for (let k = 0; k < nb; k++) { const i = 2 + 3 * k; s += v[i] * Math.exp(-((y - v[i + 1]) ** 2) / (2 * v[i + 2] ** 2)); }
+      return s;
+    };
+    const cost = v => ys.reduce((s, y) => s + (p[y] - model(v, y)) ** 2, 0);
+    let lam = 1e-2, c0 = cost(x);
+    const m = x.length;
+    for (let it = 0; it < 60; it++) {
+      // Normal equations from the exact derivatives of the model.
+      const A = Array.from({ length: m }, () => new Array(m).fill(0)), g = new Array(m).fill(0), row = new Array(m);
+      for (const y of ys) {
+        let f = x[0] + x[1] * (y - y0);
+        row[0] = 1; row[1] = y - y0;
+        for (let k = 0; k < nb; k++) {
+          const i = 2 + 3 * k, a = x[i], mu = x[i + 1], sd = x[i + 2], u = (y - mu) / sd, e = Math.exp(-u * u / 2);
+          f += a * e;
+          row[i] = e; row[i + 1] = a * e * u / sd; row[i + 2] = a * e * u * u / sd;
+        }
+        const r = p[y] - f;
+        for (let a = 0; a < m; a++) { g[a] += row[a] * r; for (let b = a; b < m; b++) A[a][b] += row[a] * row[b]; }
+      }
+      for (let a = 0; a < m; a++) for (let b = 0; b < a; b++) A[a][b] = A[b][a];
+      let improved = false;
+      for (let tries = 0; tries < 8 && !improved; tries++) {
+        const d = solveSmall(A.map((r, i) => r.map((v, j) => (i === j ? v * (1 + lam) + 1e-9 : v))), g);
+        if (!d) { lam *= 10; continue; }
+        const xn = clamp(x.map((v, i) => v + d[i])), cn = cost(xn);
+        if (cn < c0) { improved = c0 - cn > 1e-9 * c0; x = xn; c0 = cn; lam = Math.max(1e-6, lam / 3); if (!improved) break; } else lam *= 10;
+      }
+      if (!improved) break;
+    }
+    return centers.map((_, k) => { const i = 2 + 3 * k; return x[i] * x[i + 2] * Math.sqrt(2 * Math.PI); });
+  }
+
   function withoutBands(ps, idx) {
     const out = Float32Array.from(ps), n = ps.length;
     idx.forEach(m => {
@@ -917,7 +987,17 @@
       const altTotal = alt.reduce((s, v) => s + v, 0);
       const e1 = editingGuschin(fc), e2 = altTotal > 0 ? editingGuschin((altTotal - alt[0]) / altTotal) : e1;
       const d = Math.abs(e1 - e2);
-      if (d >= OVERLAP.large || (d >= OVERLAP.points && Math.max(e1, e2) >= OVERLAP.ratio * Math.min(e1, e2))) flags.push('bands overlap: result depends on the baseline');
+      let overlap = d >= OVERLAP.large || (d >= OVERLAP.points && Math.max(e1, e2) >= OVERLAP.ratio * Math.min(e1, e2));
+      // A second opinion that separates touching bands: one Gaussian per measured band on a straight
+      // baseline. It is not used as the value (saturated or smeared bands are not Gaussian), only to
+      // say when the value depends on how touching bands are split.
+      const meas = peaks.filter((y, k) => k === 0 || prods[k - 1].found);
+      if (!overlap && meas.length >= 2) {
+        const fit = fitBandAreas(pm, v0, vN, meas, Math.max(1.5, (vN - v0) / (6 * meas.length)));
+        const fitTotal = fit.reduce((s, v) => s + v, 0);
+        if (fitTotal > 0 && Math.abs(editingGuschin((fitTotal - fit[0]) / fitTotal) - e1) >= OVERLAP.fit) overlap = true;
+      }
+      if (overlap) flags.push('bands overlap: result depends on the baseline');
     }
 
     return {

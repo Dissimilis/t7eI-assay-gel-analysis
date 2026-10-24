@@ -77,7 +77,7 @@ Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit c
 | boundary crosses band | A boundary set by hand lies past the peak of a band, so part of that band is counted with its neighbour. |
 | bands set | Bands were removed or assigned by hand (`manual band assignment`). |
 | overlap | A removed band runs into a measured band, so its share cannot be separated cleanly; check the value. |
-| bands overlap | Neighbouring bands run into each other, typically faint products on the tail of a strong parent. Measured on one straight line under the lane instead, % editing differs by at least 4 points and by a factor of 1.75, or by 8 points or more, so the value depends on the *Background* setting. Compare with *Envelope*. |
+| bands overlap | Neighbouring bands run into each other, typically faint products on the tail of a strong parent. Measured on one straight line under the lane instead, % editing differs by at least 4 points and by a factor of 1.75, or by 8 points or more; or a fit of one band shape per band, which separates touching bands, differs from the value by 3 points or more. Either way the value depends on how touching bands are split. Compare with *Envelope*. |
 | other pattern | The lane follows a different product pattern than most lanes of its row (rows can mix amplicons; `product positions differ from the row`). The pattern is the app's own guess, so check the bands. |
 | parent at product | The lane's parent sits one product offset below the parents of nearby lanes: at high editing the faint parent may have been missed and a product taken for it. Check the band assignment. |
 
@@ -92,7 +92,7 @@ The engine was also compared with careful hand analysis in ImageJ of a real Invi
 `tests/invariants.test.js` checks rules that must hold on any gel, on seeded random synthetic rows (`tests/gels.js`) with all three backgrounds and both product counts:
 
 - **Normal gels** (bands at least six band widths apart, light noise, editing up to 70%): every sample lane reads within 2.5 points of the truth or carries a warning.
-- **Hard gels** (bands four widths apart, more noise, a sloped background, primer dimers, wells inside the box, clipped bands, editing up to 85%): with two products no lane is more than 10 points off without a warning; with one product at most 0.5% of lanes are. Smaller errors without a warning do occur, mostly the *Valley* background reading 2–6 points low where bands nearly touch.
+- **Hard gels** (bands four widths apart, more noise, a sloped background, primer dimers, wells inside the box, clipped bands, editing up to 85%): with two products no lane is more than 10 points off without a warning; with one product at most 0.5% of lanes are. Smaller errors without a warning are rare (at most 3% of lanes off by more than 2.5 points), mostly the *Valley* background reading low where bands nearly touch.
 - **Hand edits** change only their own lane: the row's shared decisions and every other lane come from the same row with all edits taken out.
 - **Lane order** changes no result, random boxes and settings never crash, and the same input always gives the same result.
 

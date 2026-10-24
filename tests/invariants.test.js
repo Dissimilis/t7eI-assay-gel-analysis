@@ -39,9 +39,13 @@ for (const m of MODES) {
   test(`hard gels never read more than 10 points off without a warning (${label(m)})`, () => {
     // Close bands, noise, sloped background, dimers, wells and clipping. Two products give the
     // row enough to cross-check; with one product a few lanes above 75% editing slip through.
-    const { out, lanes } = silentErrors(range(1, 150), Object.assign({ hard: true }, m), 10);
+    const opts = Object.assign({ hard: true }, m);
+    const { out, lanes } = silentErrors(range(1, 150), opts, 10);
     if (m.products === 2) assert.deepEqual(out, []);
     else assert.ok(out.length <= 0.005 * lanes, `${out.length} of ${lanes} lanes:\n` + out.join('\n'));
+    // Smaller misses without a warning stay rare: mostly Valley where bands nearly touch.
+    const small = silentErrors(range(1, 150), opts, 2.5);
+    assert.ok(small.out.length <= 0.03 * small.lanes, `${small.out.length} of ${small.lanes} lanes off by more than 2.5 points without a warning`);
   });
 }
 
