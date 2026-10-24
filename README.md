@@ -66,12 +66,12 @@ Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit c
 | brighter product | Expected above about 37% editing; listed so the band assignment can be checked. |
 | product saturated | A cleavage product is clipped too. The value is unreliable in either direction. |
 | extra band | A band that matches neither the parent nor the products recurs across the row, for example a primer dimer; flagged in the lanes that carry it. Its signal may be counted with a neighbouring band: remove it with the band menu. |
-| check bands | In most lanes of the row a product looks brighter than the parent. That happens above about 37% editing, but more often the box includes the wells or a band above the parents. Also set when a lane's product sits at a position seen in under half as many lanes as the other product, which is more often a dimer or a second PCR product than a cleavage product, and, with one product, when two lanes show a further band above the row's product: the row cannot tell which of the two is the cleavage product and which a primer dimer. |
+| check bands | In most lanes of the row a product looks brighter than the parent. That happens above about 37% editing, but more often the box includes the wells or a band above the parents. Also set when a lane's product sits at a position seen in under half as many lanes as the other product, which is more often a dimer or a second PCR product than a cleavage product, and, with one product, when lanes show a further band above the row's product: the row cannot tell which of the two is the cleavage product and which a primer dimer. With two products, also when product 2 measures more than twice product 1: both fragments come from the same cut molecules, so the shorter one carries less dye. |
 | weak | The lane's strongest band is barely above background. |
 | edge | A band is cut by the box edge, so part of it is missing and the baseline is lifted. Draw the box a little larger. |
 | well? | The parent sits at the very top of the box, which usually means a well is inside the box. Start the box just above the parent bands. |
 | unassigned band | A band inside the measured range is neither the parent nor a product, so its signal may be counted. |
-| band above | A band above the parent: often a faint parent at very high editing, or a well. Also set when the lane has even a faint band where nearby lanes have their parent or a band above it, or, without products, a band one product length above its parent. Check the band assignment. |
+| band above | A band above the parent: often a faint parent at very high editing, or a well. Also set when the lane has even a faint band where nearby lanes have their parent or a band above it, or, without products, a band one product length above its parent. In boxes of one to three lanes any band above the parent that stands out of the noise counts. Check the band assignment. |
 | edited | Band boundaries were moved by hand (`manual band boundaries` in the export). |
 | edits dropped | Band boundaries set by hand no longer match the bands found, so the automatic ones were used. |
 | boundary crosses band | A boundary set by hand lies past the peak of a band, so part of that band is counted with its neighbour. |
@@ -93,6 +93,7 @@ The engine was also compared with careful hand analysis in ImageJ of a real Invi
 `tests/invariants.test.js` checks rules that must hold on any gel, on seeded random synthetic rows (`tests/gels.js`) with all three backgrounds and both product counts:
 
 - **Normal gels** (bands at least six band widths apart, light noise, editing up to 70%): every sample lane reads within 2.5 points of the truth or carries a warning.
+- **Hard gels cut into boxes of one to three lanes** find every lane, and at most 0.5% of lanes read more than 10 points off without a warning.
 - **Hard gels** (bands four widths apart, more noise, a sloped background, primer dimers, wells inside the box, clipped bands, editing up to 85%): no lane is more than 10 points off without a warning. Smaller errors without a warning are rare (at most 1.5% of lanes off by more than 2.5 points), mostly the *Valley* background reading low where bands nearly touch.
 - **Small boxes** around one to three lanes find every lane, also on blurred, nearly noise-free images, and on normal gels read within 2.5 points or warn.
 - **Rows as imagers give them** (a smile across the row, lanes of uneven brightness and spacing, primer dimers, dark or light bands): every lane is found, and no lane is more than 10 points off without a warning.
@@ -102,7 +103,7 @@ The engine was also compared with careful hand analysis in ImageJ of a real Invi
 
 An end lane with a strong extra band of its own (for example a primer dimer only in that lane) is shown as a ladder, without a value. **Measure this lane** measures it as a sample.
 
-Rows of one to three lanes have few other lanes to cross-check against, so fewer problems are flagged there: on hard gels with one product, a lane above about 75% editing whose faint parent shows only as a shoulder on the product can read near 0% without a warning (in about 2–6% of such lanes). With a primer dimer in most lanes and only one cut lane in the row, the row can take the dimer for the product, and an uncut lane with only the dimer then reads about 10% without a warning; with two cut lanes or more the row warns. A parent fainter than the noise at very high editing can still be missed when the neighbours do not show it either.
+Boxes of one to three lanes have few other lanes to cross-check against. On hard gels with one product, about 0.3% of their lanes still read more than 10 points off without a warning: a lone lane above about 75% editing whose faint parent shows only as a shoulder on the product (no separate peak), or a lone uncut lane with only a primer dimer, which looks the same as a cut lane. In full rows the neighbours catch both.
 
 ## Limitations of the assay
 

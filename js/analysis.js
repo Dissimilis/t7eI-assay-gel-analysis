@@ -296,6 +296,8 @@
         let l = c, rr = c;
         while (l > 0 && d[l - 1] > half) l--;
         while (rr < d.length - 1 && d[rr + 1] > half) rr++;
+        // A weaker maximum whose half-height span takes in a stronger lane is that lane's shoulder.
+        if (out.some(k => k.c >= l && k.c <= rr)) continue;
         out.push({ c: Math.round((l + rr) / 2), l, r: rr });
       }
       return out;
@@ -635,26 +637,30 @@
       if (q.offPattern) l.flags.push('product positions differ from the row');
       if (l.role === 'sample' && atProduct(q, offs)) l.flags.push('parent at a product position of the row');
       if (l.role === 'sample' && !l.flags.includes('band above the parent') &&
-          (upper[i].some(u => u < q.P - NEAR_BAND && bandAt(q, u, SAME_BAND, 0.5)) ||
+          (upper[i].some(u => u < q.P - NEAR_BAND && bandAt(q, u, SAME_BAND, 0.4)) ||
            (!l.found.slice(1).some(Boolean) && offs.some(off => bandAt(q, q.P - off, offTol(off), 1))))) l.flags.push('band above the parent');
       q.offs = offs;
       return l;
     });
     // One product, yet lanes show a band at a product position of the row with a further band above
     // it, or no product where expected and a band above that place. Two such lanes with the further
-    // band at the same position mean the row cannot tell which band is the cleavage product and which
-    // a primer dimer (a dimer shows in uncut lanes too): every cut lane with that position above its
-    // product warns. Lanes whose parent may be a product do not count. Positions come from the row
-    // without edits. Not used with two products: there it flagged most lanes of rows that mix amplicons.
+    // band at the same position (or one, with a strong band) mean the row cannot tell which band is
+    // the cleavage product and which a primer dimer (a dimer shows in uncut lanes too): every cut lane
+    // with that position above its product warns. Lanes whose parent may be a product do not count.
+    // Positions come from the row without edits. Not used with two products: there it flagged most
+    // lanes of rows that mix amplicons; there product 2 brighter than product 1 warns instead.
     const above = (offs, off) => offs.length === 1 && off > NEAR_BAND && off < offs[0] - offTol(offs[0]);
     const cut = i => lanes[i].found.slice(1).some(Boolean);
-    const lower = ctx ? ctx.lower : usable.length < 3 || prm.products !== 1 ? [] : consensusOffsets(usable.map(q => pre.indexOf(q))
-      .filter(i => !upper[i].some(u => u < pre[i].P - NEAR_BAND))
-      .map(i => {
+    const lower = ctx ? ctx.lower : (() => {
+      if (usable.length < 3 || prm.products !== 1) return [];
+      const lists = usable.map(q => pre.indexOf(q)).filter(i => !upper[i].some(u => u < pre[i].P - NEAR_BAND)).map(i => {
         const q = pre[i], bands = q.cands.filter(c => c.prom >= Math.max(4 * q.noise, 0.04 * (q.ps[q.P] - minOf(q.ps))));
         const at = allOffs.filter(o => bands.some(c => Math.abs(c.off - o) <= offTol(o))).concat(cut(i) ? [] : q.offs);
-        return bands.filter(c => at.some(o => above([o], c.off)));
-      }), 8, 2);
+        return bands.filter(c => at.some(o => above([o], c.off))).map(c => Object.assign({ strong: c.prom >= 0.1 * (q.ps[q.P] - minOf(q.ps)) }, c));
+      });
+      // One lane is enough when its further band is strong: a row with a single cut lane.
+      return consensusOffsets(lists, 8, 2).concat(consensusOffsets(lists.map(l => l.filter(c => c.strong)), 8, 1));
+    })();
     lanes.forEach((l, i) => {
       if (l.role === 'sample' && cut(i) && lower.some(o => above(pre[i].offs, o)) && !l.flags.includes('check band assignment')) l.flags.push('check band assignment');
     });
@@ -1019,12 +1025,14 @@
         if (!isPeak(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.04 * hP)) { flags.push('unassigned band inside the measured range'); break; }
       }
       const ref = prominence(ps, argmax(ps, 0, n - 1), reach), none = !prods.some(x => x.found), well = Math.max(3, 0.08 * n);
+      // Without products, any band above the well zone that stands out of the noise may be a faint
+      // parent at very high editing: the lane then reads 0% instead of over 80%. A row of one or two
+      // lanes has no neighbours to show that parent, so there any band above the noise counts.
+      const few = q.rowLanes <= 3, faintBar = (few ? 1 : 3) * noise;
       for (let j = 1; j < P - NEAR_BAND && !flags.includes('band above the parent'); j++) {
         if (nearRemoved(j) || !isLocalMax(ps, j)) continue;
-        // Without products, any band above the well zone that stands out of the noise may be a faint
-        // parent at very high editing: the lane then reads 0% instead of over 80%.
         const pr = prominence(ps, j, reach);
-        if (pr >= Math.max(3 * noise, 0.05 * ref) || (none && j >= well && pr >= 3 * noise)) flags.push('band above the parent');
+        if (pr >= Math.max(3 * noise, 0.05 * ref) || ((none || few) && j >= well && pr >= faintBar)) flags.push('band above the parent');
       }
       if (q.extraBand) flags.push('extra band not matching the cleavage products');
     }
@@ -1048,6 +1056,11 @@
     const total = areas.reduce((s, v) => s + v, 0);
     const fc = total > 0 ? (total - areas[0]) / total : 0;
     if (fc === 0 && offsets.length && role === 'sample') flags.push('no cleavage');
+    // Both fragments come from the same cut molecules, so the shorter one (product 2) carries less dye
+    // than the longer one. Product 2 at more than twice product 1 is more likely a primer dimer or a
+    // second PCR product than a cleavage product.
+    if (role === 'sample' && prods.length === 2 && prods[0].found && prods[1].found && areas[2] > 2 * areas[1] &&
+        areas[1] + areas[2] >= 0.15 * total && !flags.includes('check band assignment')) flags.push('check band assignment');
     if (fc > 0 && role === 'sample') {
       // Bands that run into each other: products on the tail of the parent lose most of their area
       // to a baseline through the valleys. Measure again on a straight line between the outer

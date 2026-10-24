@@ -101,6 +101,29 @@ test('boxes around one to three lanes find them, also on blurred images, and nor
   }
 });
 
+test('hard gels cut into boxes of one to three lanes rarely read more than 10 points off without a warning', () => {
+  // Few neighbours to cross-check: a lone lane above 75% editing whose faint parent is only a
+  // shoulder, or an uncut lane with only a primer dimer, cannot be told apart from the image.
+  for (const products of [2, 1]) {
+    let lanes = 0;
+    const silent = [];
+    for (let seed = 1; seed <= 60; seed++) {
+      const g = t7Row(seed, { hard: true, products }), pitch = g.lanes[1].x - g.lanes[0].x, sig = T.signalImage(g.img, 'dark');
+      for (const k of [1, 2, 3]) for (let st = 0; st + k <= g.lanes.length; st += k) {
+        const box = { x0: Math.round(g.lanes[st].x - pitch / 2), x1: Math.round(g.lanes[st + k - 1].x + pitch / 2), y0: g.box.y0, y1: g.box.y1 };
+        const d = T.detectLanes(sig, g.img, box);
+        assert.equal(d.xs.length, k, `seed ${seed}, ${k} lanes from ${st}`);
+        const row = T.analyze(g.img, [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map(x => ({ x, role: null })) })], { polarity: 'dark', products }, sig).rows[0];
+        row.lanes.forEach((l, i) => {
+          lanes++;
+          if (l.role === 'sample' && !l.flags.some(T.isWarning) && Math.abs(l.editing - g.truth[st + i]) > 10) silent.push(`seed ${seed} lanes ${st}-${st + k - 1}: ${l.editing.toFixed(1)} vs ${g.truth[st + i].toFixed(1)}`);
+        });
+      }
+    }
+    assert.ok(silent.length <= 0.005 * lanes, `${products} products: ${silent.length} of ${lanes}:\n` + silent.join('\n'));
+  }
+});
+
 test('a hand edit changes only its own lane', () => {
   const r = rng(99);
   for (let seed = 1; seed <= 80; seed++) {
@@ -168,7 +191,8 @@ test('regressions found in review: these lanes are right or warned', () => {
   // Faint parents missed at high editing (the neighbours show them), and one-product rows that took
   // a primer dimer for the product.
   const cases = [[2789, 3, 2], [2726, 2, 2], [509, 2, 2], [617, 0, 1], [617, 1, 1], [617, 2, 1], [8, 0, 1], [449, 1, 1], [910, 2, 1],
-    [205, 3, 1], [324, 0, 1], [324, 3, 1], [437, 1, 1], [620, 0, 1], [1204, 0, 1], [1115, 2, 1]];
+    [205, 3, 1], [324, 0, 1], [324, 3, 1], [437, 1, 1], [620, 0, 1], [1204, 0, 1], [1115, 2, 1], [1553, 6, 1], [1565, 0, 1], [1565, 2, 1],
+    [2420, 3, 2]];
   for (const [seed, lane, products] of cases) {
     const g = t7Row(seed, { hard: true, products }), l = analyseRow(g.img, g.box, null, { products }).lanes[lane];
     assert.ok(l.role !== 'sample' || Math.abs(l.editing - g.truth[lane]) <= 10 || l.flags.some(T.isWarning), `seed ${seed} lane ${lane}: ${l.editing.toFixed(1)} vs ${g.truth[lane].toFixed(1)} [${l.flags}]`);
