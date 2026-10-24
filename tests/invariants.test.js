@@ -196,7 +196,8 @@ test('regressions found in review: these lanes are right or warned', () => {
     [2420, 3, 2], [7193, 0, 2], [6682, 0, 2], [2693, 11, 1], [3348, 3, 1], [3348, 4, 1], [3700, 2, 1], [6578, 3, 1], [7655, 0, 1], [7655, 1, 1],
     [9497, 3, 1], [9497, 5, 1], [9974, 3, 1], [9974, 4, 1], [10670, 2, 1], [12895, 0, 1],
     [9688, 0, 1], [9688, 0, 2], [12475, 0, 1], [12475, 1, 1], [20625, 6, 2],
-    [28595, 0, 1], [28595, 1, 1], [28595, 2, 1], [29020, 9, 1], [32579, 0, 1], [32579, 1, 1], [30313, 1, 1]];
+    [28595, 0, 1], [28595, 1, 1], [28595, 2, 1], [29020, 9, 1], [32579, 0, 1], [32579, 1, 1], [30313, 1, 1],
+    [12118, 5, 2], [40122, 3, 2], [40122, 6, 2]];
   for (const [seed, lane, products] of cases) {
     const g = t7Row(seed, { hard: true, products }), l = analyseRow(g.img, g.box, null, { products }).lanes[lane];
     assert.ok(l.role !== 'sample' || Math.abs(l.editing - g.truth[lane]) <= 10 || l.flags.some(T.isWarning), `seed ${seed} lane ${lane}: ${l.editing.toFixed(1)} vs ${g.truth[lane].toFixed(1)} [${l.flags}]`);

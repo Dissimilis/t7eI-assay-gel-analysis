@@ -79,7 +79,7 @@ Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit c
 | boundary crosses band | A boundary set by hand lies past the peak of a band, so part of that band is counted with its neighbour. |
 | bands set | Bands were removed or assigned by hand (`manual band assignment`). |
 | overlap | A removed band runs into a measured band, so its share cannot be separated cleanly; check the value. |
-| bands overlap | Neighbouring bands run into each other, typically faint products on the tail of a strong parent. Measured on one straight line under the lane instead, % editing differs by at least 4 points and by a factor of 1.75, or by 8 points or more; or a fit of one band shape per band, which separates touching bands, differs from the value by 3 points or more. Either way the value depends on how touching bands are split. Compare with *Envelope*. |
+| bands overlap | Neighbouring bands run into each other, typically faint products on the tail of a strong parent. Measured on one straight line under the lane instead, % editing differs by at least 4 points and by a factor of 1.75, by 4 points while product 2 measures at least as much as product 1 (it carries less dye, so a band below has run into it), or by 8 points or more; or a fit of one band shape per band, which separates touching bands, differs from the value by 3 points or more. Either way the value depends on how touching bands are split. Compare with *Envelope*. |
 | smoothing | Smoothing is above the default and the lane's value moves by 2 points or more against the default smoothing: bands may have been merged. |
 | other pattern | The lane follows a different product pattern than most lanes of its row (rows can mix amplicons; `product positions differ from the row`). The pattern is the app's own guess, so check the bands. |
 | parent at product | The lane's parent sits one product offset below the parents of nearby lanes: at high editing the faint parent may have been missed and a product taken for it. Check the band assignment. |
@@ -107,7 +107,7 @@ An end lane with a strong extra band of its own (for example a primer dimer only
 
 Boxes of one to three lanes have few other lanes to cross-check against. With one product, an uncut lane with only a primer dimer looks like a lane cut up to about 20%, and a lane cut above about 75% whose faint parent shows only as a shoulder on the product looks uncut; the image alone cannot tell them apart. In such boxes every lane reading under 20% carries the warning *few lanes*: check it against a full row or a sequencing result.
 
-In sweeps of 45,000 random hard rows (2.2 million lane results), 3 lane results were more than 10 points off without a warning, all with the *Valley* background: two products where a primer dimer as bright as the real product 2 was taken for it (*Blend* and *Envelope* read those lanes right). In boxes of a single two-product lane above 80% editing whose parent is only a shoulder, about 1 in 100,000 lanes reads near 25%.
+In sweeps of 45,000 random hard rows (2.2 million lane results), no lane was more than 10 points off without a warning. In boxes of a single two-product lane above 80% editing whose faint parent lies a few band widths above a band 17 times brighter, the parent can show as a rise of 0.1 grey, below what an 8-bit image resolves; such a lane reads near 25% (about 1 in 200,000 small-box lanes).
 
 ## Limitations of the assay
 

@@ -1121,7 +1121,7 @@
       // lanes has no neighbours to show that parent, so there any band above the noise counts.
       // The slope-based noise grows with the flanks of strong bands; a short row uses the smaller
       // curvature-based estimate as well.
-      const few = q.rowLanes <= 3, faintBar = few ? 0.5 * Math.min(noise, curvatureNoise(q.p)) : 2 * noise;
+      const few = q.rowLanes <= 3, faintBar = few ? 0.3 * Math.min(noise, curvatureNoise(q.p)) : 2 * noise;
       for (let j = 1; j < P - NEAR_BAND && !flags.includes('band above the parent'); j++) {
         if (nearRemoved(j) || !isLocalMax(ps, j)) continue;
         const pr = prominence(ps, j, reach);
@@ -1171,7 +1171,10 @@
           areas[2] > 1.0 * areas[1] && alt[2] > 1.0 * alt[1] && !flags.includes('check band assignment')) flags.push('check band assignment');
       const e1 = editingGuschin(fc), e2 = altTotal > 0 ? editingGuschin((altTotal - alt[0]) / altTotal) : e1;
       const d = Math.abs(e1 - e2);
-      let overlap = d >= OVERLAP.large || (d >= OVERLAP.points && Math.max(e1, e2) >= OVERLAP.ratio * Math.min(e1, e2));
+      // Also when product 2, which carries less dye than product 1, measures at least as much: then
+      // a band below has likely run into it, and the value hangs on where the baseline cuts.
+      let overlap = d >= OVERLAP.large || (d >= OVERLAP.points && Math.max(e1, e2) >= OVERLAP.ratio * Math.min(e1, e2)) ||
+        (d >= OVERLAP.points && areas.length === 3 && areas[2] >= areas[1] && areas[1] > 0);
       // A second opinion that separates touching bands: one Gaussian per measured band on a straight
       // baseline. It is not used as the value (saturated or smeared bands are not Gaussian), only to
       // say when the value depends on how touching bands are split.
