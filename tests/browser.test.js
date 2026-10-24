@@ -10,8 +10,10 @@ const chrome = findChrome();
 
 test('the app in a browser', { skip: !chrome && 'no Chrome found (set CHROME_PATH)', timeout: 120000 }, async t => {
   const { server, url } = await serve();
-  const page = await launch(chrome);
+  let page;
   try {
+    // A busy runner can miss the first start; a failure must still close the server, or the run hangs.
+    page = await launch(chrome).catch(() => launch(chrome));
     await page.go(url + 'index.html');
     // Catch downloads instead of saving them.
     await page.eval(`(() => { window.__blobs = []; const o = URL.createObjectURL; URL.createObjectURL = b => { window.__blobs.push(b); return o.call(URL, b); }; HTMLAnchorElement.prototype.click = function () {}; })()`);
@@ -177,7 +179,8 @@ test('the app in a browser', { skip: !chrome && 'no Chrome found (set CHROME_PAT
       assert.deepEqual(page.errors, []);
     });
   } finally {
-    await page.close();
+    if (page) await page.close();
+    server.closeAllConnections();
     server.close();
   }
 });
