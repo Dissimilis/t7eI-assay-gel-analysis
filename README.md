@@ -107,6 +107,8 @@ An end lane with a strong extra band of its own (for example a primer dimer only
 
 Boxes of one to three lanes have few other lanes to cross-check against. With one product, an uncut lane with only a primer dimer looks like a lane cut up to about 20%, and a lane cut above about 75% whose faint parent shows only as a shoulder on the product looks uncut; the image alone cannot tell them apart. In such boxes every lane reading under 20% carries the warning *few lanes*: check it against a full row or a sequencing result.
 
+In sweeps of 45,000 random hard rows (2.2 million lane results), 3 lane results were more than 10 points off without a warning, all with the *Valley* background: two products where a primer dimer as bright as the real product 2 was taken for it (*Blend* and *Envelope* read those lanes right). In boxes of a single two-product lane above 80% editing whose parent is only a shoulder, about 1 in 100,000 lanes reads near 25%.
+
 ## Limitations of the assay
 
 - T7E1 underestimates editing compared with sequencing, and it misses most single-base changes ([Vouillot et al. 2015](https://doi.org/10.1534/g3.114.015834); [Sentmanat et al. 2018](https://doi.org/10.1038/s41598-018-19441-8)).
