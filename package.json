@@ -6,6 +6,6 @@
   "license": "MIT",
   "scripts": {
     "test": "node --test \"tests/*.test.js\"",
-    "audit": "node tests/audit.js"
+    "release-audit": "node tests/audit.js"
   }
 }
