@@ -1168,7 +1168,7 @@
       // dye than the longer one. Product 2 well above product 1 on both baselines is more likely a
       // primer dimer or a second PCR product than a cleavage product.
       if (prods.length === 2 && prods[0].found && prods[1].found && areas[1] + areas[2] >= 0.15 * total &&
-          areas[2] > 1.0 * areas[1] && alt[2] > 1.0 * alt[1] && !flags.includes('check band assignment')) flags.push('check band assignment');
+          ((areas[2] > areas[1] && alt[2] > alt[1]) || (q.rowLanes <= 3 && areas[2] > 1.3 * areas[1])) && !flags.includes('check band assignment')) flags.push('check band assignment');
       const e1 = editingGuschin(fc), e2 = altTotal > 0 ? editingGuschin((altTotal - alt[0]) / altTotal) : e1;
       const d = Math.abs(e1 - e2);
       // Also when product 2, which carries less dye than product 1, measures at least as much: then
