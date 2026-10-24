@@ -55,6 +55,13 @@ test('rejects a truncated TIFF instead of filling the rest with zeros', async ()
   await assert.rejects(TIFF.decode(load('gray8-truncated.tif')), /truncated|damaged/);
 });
 
+test('rejects damaged Deflate data with a message', async () => {
+  // The fixture's one strip starts at byte 8 behind a two-byte zlib header; scramble its body.
+  const b = Buffer.from(load('gray8-deflate.tif'));
+  for (let i = 12; i < 60; i++) b[i] ^= 0x5a;
+  await assert.rejects(TIFF.decode(b.buffer.slice(b.byteOffset, b.byteOffset + b.length)), /corrupt Deflate|truncated Deflate/);
+});
+
 test('rejects huge declared dimensions before allocating', async () => {
   // Little-endian header, one IFD with width = height = 30000 and a 1-byte strip.
   const entries = [[256, 4, 1, 30000], [257, 4, 1, 30000], [258, 3, 1, 8], [273, 4, 1, 8], [279, 4, 1, 1]];

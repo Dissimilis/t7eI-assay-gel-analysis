@@ -3,7 +3,7 @@
   'use strict';
 
   const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample, XLSX = window.T7EIXlsx;
-  const VERSION = '1.5.2';
+  const VERSION = '1.5.3';
   const STORE = 't7eI.params.v1';
   const $ = id => document.getElementById(id);
 
@@ -973,7 +973,7 @@
     const box = els.bandList;
     const open = els.editBands.getAttribute('aria-expanded') === 'true';
     box.hidden = !open || !r || r.role === 'marker' || r.role === 'excluded';
-    if (box.hidden) return;
+    if (box.hidden) { box.textContent = ''; return; }   // no controls left behind for a lane no longer shown
     const lane = laneAt(s.ri, s.li), b = lane.bands || {};
     const all = [];
     r.peaks.concat(r.removed || [], r.candidates || []).forEach(i => { if (!all.some(j => Math.abs(j - i) <= SAME)) all.push(i); });

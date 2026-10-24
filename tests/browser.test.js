@@ -92,7 +92,7 @@ test('the app in a browser', { skip: !chrome && 'no Chrome found (set CHROME_PAT
 
     await t.test('a polarity change finds the lanes again and says so after edits', async () => {
       await pick(lane);
-      await page.eval(`document.getElementById('editBands').click()`);
+      await page.eval(`(() => { const b = document.getElementById('editBands'); if (b.getAttribute('aria-expanded') !== 'true') b.click(); })()`);
       await setBand('product 1', 'removed');
       await radio('polarity', 'light');
       await page.sleep(400);
@@ -158,6 +158,19 @@ test('the app in a browser', { skip: !chrome && 'no Chrome found (set CHROME_PAT
       await page.sleep(300);
       assert.equal(await menuOpen(), false);
       await page.size(1440, 1000);
+    });
+
+    await t.test('selecting a ladder leaves no band controls of the previous lane', async () => {
+      await pick(lane);
+      const wasOpen = (await page.eval(`document.getElementById('editBands').getAttribute('aria-expanded')`)) === 'true';
+      if (!wasOpen) await page.eval(`document.getElementById('editBands').click()`);
+      assert.ok((await bandRows()).length > 0, 'band list open on a sample lane');
+      const ladder = await page.eval(`Array.from(document.querySelectorAll('#laneChips button')).findIndex(b => b.classList.contains('dim'))`);
+      assert.ok(ladder >= 0, 'the sample gel has a ladder lane');
+      await pick(ladder);
+      assert.equal(await page.eval(`document.querySelectorAll('#bandList select').length`), 0);
+      await pick(lane);
+      if (!wasOpen) await page.eval(`document.getElementById('editBands').click()`);
     });
 
     await t.test('no errors in the console', async () => {

@@ -98,12 +98,17 @@
     const reader = new Blob([input]).stream().pipeThrough(new DecompressionStream('deflate')).getReader();
     const out = new Uint8Array(expected);
     let n = 0;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (n + value.length > expected) { out.set(value.subarray(0, expected - n), n); n = expected; await reader.cancel(); break; }
-      out.set(value, n);
-      n += value.length;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (n + value.length > expected) { out.set(value.subarray(0, expected - n), n); n = expected; await reader.cancel(); break; }
+        out.set(value, n);
+        n += value.length;
+      }
+    } catch (err) {
+      // The stream rejects damaged data with a bare TypeError that has no message.
+      throw new Error('corrupt Deflate data');
     }
     if (n < expected) throw new Error('truncated Deflate data');
     return out;
