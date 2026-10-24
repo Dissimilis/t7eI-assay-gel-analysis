@@ -96,7 +96,7 @@ The engine was also compared with careful hand analysis in ImageJ of a real Invi
 
 A release is done when a fresh audit passes: `node tests/audit.js` measures one independent random row per seed, from a block of seeds reserved for audits and never used to tune the engine (half full rows, half boxes of one to three lanes; normal and hard gels, one or two products, all three backgrounds). It passes when no lane the image can decide reads more than 10 points off without a warning. A lane is decidable when its parent band peaks at least 2 grey levels and 4 times the pixel noise, or when two lanes of the row keep at least 40% of their DNA uncut. Zero misses in 15,000 results per stratum puts the 95% upper bound on the miss rate at 1 in 5,000 per stratum. The audit also reports coverage, the share of lanes that get a value without a warning, so that warning more cannot pass for being more accurate. A miss found by an audit is fixed against new seeds, and the next release audits the next unused block.
 
-Version 1.7.6, audit of seeds 1,000,001–1,030,000: full rows 0 silent misses (bound 1 in 5,003), 51.7% of lanes unflagged; boxes of one to three lanes 0 silent misses (bound 1 in 4,871), 44.0% unflagged.
+Version 1.7.7, audit of seeds 1,030,001–1,060,000: full rows 0 silent misses (bound 1 in 5,003), 52.9% of lanes unflagged; boxes of one to three lanes 0 silent misses (bound 1 in 4,883), 43.8% unflagged. (1.7.6 passed on seeds 1,000,001–1,030,000.)
 
 `tests/invariants.test.js` checks rules that must hold on any gel, on seeded random synthetic rows (`tests/gels.js`) with all three backgrounds and both product counts:
 

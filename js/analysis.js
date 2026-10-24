@@ -617,7 +617,7 @@
     const reach = reachOf(n), well = Math.ceil(Math.max(3, 0.08 * n));
     const bandAt = (q, u, tol, min) => {
       for (let j = Math.max(well, Math.round(u - tol)); j <= Math.min(q.P - NEAR_BAND - 1, Math.round(u + tol)); j++) {
-        if (isLocalMax(q.ps, j) && !q.ov.removed.some(x => Math.abs(x - j) <= SAME_BAND) && prominence(q.ps, j, reach) >= min * q.noise) return true;
+        if (isLocalMax(q.ps, j) && !q.ov.removed.some(x => Math.abs(x - j) <= SAME_BAND) && prominence(q.ps, j, reach) >= min * Math.min(q.noise, curvatureNoise(q.p))) return true;
       }
       return false;
     };
@@ -1149,6 +1149,14 @@
     const total = areas.reduce((s, v) => s + v, 0);
     const fc = total > 0 ? (total - areas[0]) / total : 0;
     if (fc === 0 && offsets.length && role === 'sample') flags.push('no cleavage');
+    // A lane reading under 20% with any band above its parent that stands out of the noise: at very
+    // high editing the parent fades to such a band and a product is read as the parent.
+    if (role === 'sample' && editingGuschin(fc) < 20 && !flags.includes('band above the parent')) {
+      const well = Math.max(3, 0.08 * n), reach = reachOf(n);
+      for (let j = Math.ceil(well); j < P - NEAR_BAND; j++) {
+        if (!nearRemoved(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= noise) { flags.push('band above the parent'); break; }
+      }
+    }
 
     if (fc > 0 && role === 'sample') {
       // Bands that run into each other: products on the tail of the parent lose most of their area
