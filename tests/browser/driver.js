@@ -40,7 +40,7 @@ async function launch(chrome) {
   if (process.env.CI) args.unshift('--no-sandbox');
   const proc = spawn(chrome, args, { stdio: 'ignore' });
   let targets = [];
-  for (let i = 0; i < 100 && !targets.some(t => t.type === 'page'); i++) {
+  for (let i = 0; i < 300 && !targets.some(t => t.type === 'page'); i++) {   // up to 30 s: CI runners can be slow to start Chrome
     try { targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); } catch (e) { /* not up yet */ }
     if (!targets.some(t => t.type === 'page')) await sleep(100);
   }
