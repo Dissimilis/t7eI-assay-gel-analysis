@@ -47,7 +47,7 @@ The pipeline for each row:
 | Lane width | 50% of pitch | 20–90% |
 | Smoothing | σ 1.5 px | 0–4 px |
 
-Settings are remembered in the browser. **Reset defaults** restores them. Changing the number of cleavage products resets hand-moved band boundaries and band choices, and clears Undo.
+Settings are remembered in the browser. **Reset defaults** restores them. Changing the number of cleavage products or the band polarity resets hand-moved band boundaries and band choices, and clears Undo; the app says so when there were any.
 
 Keyboard: with a lane selected, ← and → move it (Shift for 5 px), [ and ] select the previous or next lane, and Delete removes it. **Load image** and every control are reachable with Tab; drawing a row and moving band boundaries need a pointer.
 
@@ -66,7 +66,7 @@ Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit c
 | brighter product | Expected above about 37% editing; listed so the band assignment can be checked. |
 | product saturated | A cleavage product is clipped too. The value is unreliable in either direction. |
 | extra band | A band that matches neither the parent nor the products recurs across the row, for example a primer dimer; flagged in the lanes that carry it. Its signal may be counted with a neighbouring band: remove it with the band menu. |
-| check bands | In most lanes of the row a product looks brighter than the parent. That happens above about 37% editing, but more often the box includes the wells or a band above the parents. |
+| check bands | In most lanes of the row a product looks brighter than the parent. That happens above about 37% editing, but more often the box includes the wells or a band above the parents. Also set when a lane's product sits at a position seen in under half as many lanes as the other product, which is more often a dimer or a second PCR product than a cleavage product. |
 | weak | The lane's strongest band is barely above background. |
 | edge | A band is cut by the box edge, so part of it is missing and the baseline is lifted. Draw the box a little larger. |
 | well? | The parent sits at the very top of the box, which usually means a well is inside the box. Start the box just above the parent bands. |
@@ -74,6 +74,7 @@ Images are limited to 40 megapixels. 16-bit TIFFs that hold 10-, 12- or 14-bit c
 | band above | A band above the parent: often a faint parent at very high editing, or a well. Check the band assignment. |
 | edited | Band boundaries were moved by hand (`manual band boundaries` in the export). |
 | edits dropped | Band boundaries set by hand no longer match the bands found, so the automatic ones were used. |
+| boundary crosses band | A boundary set by hand lies past the peak of a band, so part of that band is counted with its neighbour. |
 | bands set | Bands were removed or assigned by hand (`manual band assignment`). |
 | overlap | A removed band runs into a measured band, so its share cannot be separated cleanly; check the value. |
 | bands overlap | Neighbouring bands run into each other, typically faint products on the tail of a strong parent. Measured on one straight line under the lane instead, % editing differs by at least 4 points and by a factor of 1.75, so the value depends on the *Background* setting. Compare with *Envelope*. |

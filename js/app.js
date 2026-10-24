@@ -73,7 +73,7 @@
   const WARN = ['parent saturated', 'product saturated', 'weak lane', 'band cut by the box edge', 'band at the top of the box: a well?',
     'unassigned band inside the measured range', 'band above the parent', 'extra band not matching the cleavage products',
     'check band assignment', 'only one cleavage product found', 'removed band overlaps a measured band',
-    'bands overlap: result depends on the baseline'];
+    'bands overlap: result depends on the baseline', 'band boundary crosses a band'];
   function isWarn(f) { return WARN.includes(f) || /invalid|second product visible/.test(f); }
   const MAX_PIXELS = 40e6;
 
@@ -256,6 +256,14 @@
       if (near) { used.add(near); lane.role = near.role; lane.label = near.label; if (keepBoundaries) lane.valleys = near.valleys; }
       return lane;
     });
+  }
+
+  /** Clear every lane's hand-made band choices, boundaries and undo history, and say so if there were any. */
+  function resetEdits(message) {
+    const edited = state.rows.some(row => row.lanes.some(l => l.bands || l.valleys));
+    state.rows.forEach(row => row.lanes.forEach(l => { l.valleys = null; l.bands = null; l.undo = []; }));
+    closeBandMenu();
+    if (edited) setMessage(message);
   }
 
   /** Find the lanes of every row again (new polarity); hand-made band choices do not carry over. */
@@ -490,7 +498,8 @@
     if (state.profZoom && r.valleys && r.valleys.length > 2) {
       // Scale to the cleavage products; the parent peak runs off the top of the plot.
       hi = -Infinity;
-      for (let i = r.valleys[1]; i < n; i++) hi = Math.max(hi, r.profile[i]);
+      const s0 = r.segKinds ? Math.max(0, r.segKinds.indexOf(0)) : 0;
+      for (let i = r.valleys[s0 + 1]; i < n; i++) hi = Math.max(hi, r.profile[i]);
       hi += (hi - lo) * 0.25;
     }
     lo = Math.floor(lo - 2); hi = Math.ceil(hi + (hi - lo) * 0.08 + 2);
@@ -666,7 +675,7 @@
       'manual band boundaries': 'edited', 'only one cleavage product found': 'one product', 'second product visible: set two products': 'second product?',
       'cleavage product brighter than parent': 'brighter product', 'manual band assignment': 'bands set',
       'removed band overlaps a measured band': 'overlap', 'product positions differ from the row': 'other pattern',
-      'bands overlap: result depends on the baseline': 'bands overlap', 'manual band boundaries ignored: the number of bands changed': 'edits dropped' })[f] ||
+      'bands overlap: result depends on the baseline': 'bands overlap', 'band boundary crosses a band': 'boundary crosses band', 'manual band boundaries ignored: the number of bands changed': 'edits dropped' })[f] ||
       f.replace('product ', 'P').replace(' not detected', ' missing').replace(/fraction cleaved > 0.5.*/, 'f > 0.5');
   }
 
@@ -848,7 +857,7 @@
       if (key === 'polarity' && state.img) redetectAll();
       // Manual boundaries are tied to the number of bands, so a new product count resets them.
       // Band choices and boundaries depend on the number of bands: a new product count starts them afresh.
-      if (key === 'products') state.rows.forEach(row => row.lanes.forEach(l => { l.valleys = null; l.bands = null; l.undo = []; }));
+      if (key === 'products') resetEdits('Product count changed; band choices and boundaries set by hand were cleared.');
       recompute();
     });
   });
@@ -859,7 +868,7 @@
     const oldPol = state.params.polarity, oldProducts = state.params.products;
     state.params = Object.assign({}, T.DEFAULTS, { polarity: state.img ? T.detectPolarity(state.img) : oldPol });
     if (state.img && state.params.polarity !== oldPol) redetectAll();
-    if (state.params.products !== oldProducts) state.rows.forEach(row => row.lanes.forEach(l => { l.valleys = null; l.bands = null; l.undo = []; }));
+    if (state.params.products !== oldProducts) resetEdits('Product count changed; band choices and boundaries set by hand were cleared.');
     saveParams();
     recompute();
   });
@@ -1055,12 +1064,14 @@
   let resizeFrame = 0;
   window.addEventListener('resize', () => {
     if (resizeFrame) return;
-    resizeFrame = requestAnimationFrame(() => { resizeFrame = 0; renderOverlay(); renderLane(); });
+    resizeFrame = requestAnimationFrame(() => { resizeFrame = 0; closeBandMenu(); renderOverlay(); renderLane(); });
   });
 
   // ------------------------------------------------------------ export
 
   function baseName() { return (state.name || 'gel').replace(/\.[^.]+$/, ''); }
+
+  function fText() { return state.params.products === 1 ? 'cut1/(parent+cut1)' : '(cut1+cut2)/(parent+cut1+cut2)'; }
 
   function download(blob, name) {
     const a = document.createElement('a');
@@ -1097,7 +1108,7 @@
     const note = t => lines.push(csvCell('# ' + t));
     note('T7E1 Gel Analysis ' + VERSION);
     note('file: ' + state.name + '; exported ' + new Date().toISOString());
-    note('formula: Guschin 2010 100*(1-sqrt(1-f)); f = (cut1+cut2)/(parent+cut1+cut2)');
+    note('formula: Guschin 2010 100*(1-sqrt(1-f)); f = ' + fText());
     note('background: ' + p.background + '; lane width: ' + Math.round(p.laneWidth * 100) + '% of pitch; smoothing sigma: ' + p.smoothing + ' px; products: ' + p.products);
     lines.push(['row', 'lane', 'label', 'type', 'x_px', 'parent_area', 'cut1_area', 'cut2_area', 'fraction_cleaved', 'editing_pct', 'flags'].join(','));
     lanesForExport().forEach(e => {
@@ -1161,7 +1172,7 @@
     });
     const settings = [['Setting', 'Value'],
       ['App', 'T7E1 Gel Analysis ' + VERSION], ['File', state.name], ['Exported', new Date().toISOString()],
-      ['Formula', '% editing = 100*(1-sqrt(1-f)), f = (cut1+cut2)/(parent+cut1+cut2) (Guschin 2010, NEB)'],
+      ['Formula', '% editing = 100*(1-sqrt(1-f)), f = ' + fText() + ' (Guschin 2010, NEB)'],
       ['Background', p.background], ['Lane width (% of pitch)', Math.round(p.laneWidth * 100)],
       ['Smoothing sigma (px)', p.smoothing], ['Cleavage products', p.products],
       ['Image', state.img.w + ' x ' + state.img.h + ' px, ' + state.img.bits + '-bit' + (state.img.storedBits > state.img.bits ? ' data in a ' + state.img.storedBits + '-bit file' : '')]];

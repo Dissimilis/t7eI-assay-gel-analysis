@@ -479,3 +479,64 @@ test('lane order does not change which lanes are ends of the row', () => {
   assert.deepEqual(byX(shuffled), byX(sorted));
   assert.equal(sorted.lanes[0].role, 'marker');
 });
+
+test('removing the real parent leaves a lane that says only one product is left', () => {
+  // The vote still expects the second product where only flat background is left.
+  const lanes = [70, 170, 270, 370, 470, 570].map(x => ({ x, bands: [[45, 0.36], [77, 0.64 * 2 / 3], [113, 0.64 / 3]] }));
+  const img = bandGel(lanes, { w: 680, h: 180 }), box = { x0: 10, x1: 660, y0: 8, y1: 170 };
+  const l = analyseWith(img, box, i => (i === 2 ? { parent: null, products: [null, null], removed: [45] } : null)).lanes[2];
+  assert.ok(l.flags.some(f => WARNING.test(f)), `${l.editing.toFixed(1)}% [${l.flags.join('; ')}]`);
+});
+
+test('a product set by hand keeps its slot when the row has no product positions', () => {
+  // One lane, products too faint for the vote: both are set by hand.
+  const img = bandGel([{ x: 60, bands: [[30, 1], [60, 0.012], [95, 0.008]] }], { w: 140, h: 140, amp: 160 });
+  const run = bands => T.analyze(img, [{ x0: 0, x1: 140, y0: 5, y1: 135, pitch: 100, lanes: [{ x: 60, role: null, bands }] }], { polarity: 'dark' }).rows[0].lanes[0];
+  const two = run({ parent: null, products: [null, 90], removed: [] });
+  assert.equal(two.areas[1], 0, 'product 1 is empty');
+  assert.ok(two.areas[2] > 0, 'product 2 measured in its own column');
+  const both = run({ parent: null, products: [55, 90], removed: [] });
+  assert.ok(both.areas[1] > 0 && both.areas[2] > 0);
+  assert.ok(!both.flags.includes('no cleavage products found'), `[${both.flags.join('; ')}]`);
+});
+
+function analyseLanes(img, box, laneOf) {
+  const sig = T.signalImage(img, 'dark');
+  const d = T.detectLanes(sig, img, box);
+  return T.analyze(img, [Object.assign({}, box, { pitch: d.pitch, lanes: d.xs.map((x, i) => Object.assign({ x, role: null, bands: null }, laneOf(i))) })], { polarity: 'dark' }).rows[0];
+}
+
+test('removing a band in one end lane does not turn the other end lane into a ladder', () => {
+  const lanes = [60, 160, 260].map((x, i) => ({ x, bands: t7Bands(20, i === 1 ? [] : [[130, 0.3]]) }));
+  const img = bandGel(lanes, { w: 320, h: 170 }), box = { x0: 0, x1: 320, y0: 5, y1: 160 };
+  const auto = analyseLanes(img, box, () => ({}));
+  const edited = analyseLanes(img, box, i => (i === 0 ? { bands: { parent: null, products: [null, null], removed: [130] } } : {}));
+  [1, 2].forEach(i => assert.deepEqual([edited.lanes[i].role, edited.lanes[i].editing, edited.lanes[i].flags], [auto.lanes[i].role, auto.lanes[i].editing, auto.lanes[i].flags], 'lane ' + i));
+});
+
+test('an edit in one lane keeps the row warnings of the others, and a lane that looked like a ladder can re-fit', () => {
+  const A = t7Bands(15).map(([y, m]) => [y + 10, m]);
+  const fc = 1 - 0.6 ** 2, B = [[40, 1 - fc], [90, fc * 2 / 3], [140, fc / 3]];
+  const lanes = ['A', 'A', 'A', 'B', 'B', 'B'].map((k, i) => ({ x: 60 + i * 100, bands: (k === 'A' ? A : B).concat(i === 1 ? [[14, 0.3]] : []) }));
+  const img = bandGel(lanes, { w: 650, h: 175 }), box = { x0: 0, x1: 650, y0: 5, y1: 165 };
+  const auto = analyseLanes(img, box, () => ({}));
+  const edited = analyseLanes(img, box, i => (i === 1 ? { bands: { parent: null, products: [null, null], removed: [14] } } : {}));
+  assert.ok(Math.abs(edited.lanes[1].editing - 15) <= 1, 'edited lane ' + edited.lanes[1].editing);
+  [0, 2, 3, 4, 5].forEach(i => assert.deepEqual(edited.lanes[i].flags, auto.lanes[i].flags, 'lane ' + i));
+});
+
+test('a product position seen in only a few lanes makes those lanes warn', () => {
+  const fc = 1 - 0.8 ** 2;
+  const lanes = [...Array(8)].map((_, i) => ({ x: 60 + i * 100, bands: [[30, 1 - fc], [60, fc * 2 / 3]].concat(i === 2 || i === 5 ? [[110, 0.3]] : []) }));
+  const row = analyseBox(bandGel(lanes, { w: 840 }), { x0: 0, x1: 840, y0: 5, y1: 160 });
+  row.lanes.forEach((l, i) => assert.ok(l.flags.some(f => WARNING.test(f)), `lane ${i}: ${l.editing.toFixed(1)} [${l.flags.join('; ')}]`));
+});
+
+test('a band boundary dragged past a band is flagged', () => {
+  const lanes = [60, 160, 260, 360].map(x => ({ x, bands: [[30, 0.64], [60, 0.24], [95, 0.12]] }));
+  const img = bandGel(lanes, { w: 500 }), box = { x0: 0, x1: 500, y0: 5, y1: 135 };
+  const l = analyseLanes(img, box, () => ({})).lanes[1], v = l.valleys.map(i => i + l.y0);
+  v[1] = 70;   // past product 1 at 60
+  const dragged = analyseLanes(img, box, i => (i === 1 ? { valleys: v } : {})).lanes[1];
+  assert.ok(dragged.flags.includes('band boundary crosses a band'), `[${dragged.flags.join('; ')}]`);
+});

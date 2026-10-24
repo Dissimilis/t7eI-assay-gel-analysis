@@ -472,6 +472,13 @@
       }
     }
     const tolOf = o => 3 + 0.15 * o;
+    if (offsets && offsets.length >= 2) {
+      // Both products show in the same cut lanes. A position seen in under half as many lanes as the
+      // other is more likely a band of a few lanes (a dimer, a second product): lanes using it warn.
+      const support = offsets.map(o => usable.filter(q => q.voteCands.some(c => Math.abs(c.off - o) <= tolOf(o))).length);
+      const weak = offsets.filter((o, k) => support[k] < 0.5 * Math.max(...support));
+      if (weak.length) pre.forEach(q => { q.weakOffsets = weak; });
+    }
     const samePattern = (a, b) => a.length === b.length && a.every((o, k) => Math.abs(o - b[k]) <= tolOf(Math.max(o, b[k])));
     const patterns = offsets && offsets.length ? [offsets] : [];
     if (patterns.length && usable.length >= 3) {
@@ -500,7 +507,7 @@
       // editing and passes over a well or stray band above it. Ladders sit at the ends of a row, so
       // end lanes keep the row consensus.
       pre.forEach(q => {
-        if (q.lane.role === 'marker' || q.lane.role === 'excluded' || q.ladderLike) return;
+        if (q.lane.role === 'marker' || q.lane.role === 'excluded' || (q.ladderLike && !q.ov.removed.length)) return;
         let best = null;
         const own = q.ov.removed.length ? q.cands.slice().sort((a, b) => b.prom - a.prom).slice(0, prm.products).map(c => c.off).sort((a, b) => a - b) : [];
         const choices = own.length === prm.products ? patterns.concat([own]) : patterns;
@@ -518,7 +525,7 @@
         q.fitsPattern = best.fit.hits === best.pat.length && best.fit.left === 0;
         if (best.k > 0) q.ownOffsets = best.pat;
       });
-      const uses = patterns.map((_, k) => pre.filter(q => q.patternK === k).length);
+      const uses = patterns.map((_, k) => pre.filter(q => q.patternK === k && !q.ov.any).length);
       const main = uses.indexOf(Math.max(...uses));
       pre.forEach(q => { q.offPattern = q.patternK != null && q.patternK !== main; });
     }
@@ -530,14 +537,15 @@
     });
 
     const auto = lanes.filter(l => l.autoRole);
-    const autoMarkers = auto.filter(l => l.role === 'marker' && !l.ladderLike);
+    const autoMarkers = auto.filter(l => l.autoMarker && !l.ladderLike);
     if (auto.length >= 3 && autoMarkers.length > auto.length / 2) {
       // Most lanes cannot be ladders: the extra band is shared (a primer dimer or second PCR product).
-      autoMarkers.forEach(l => { l.role = 'sample'; l.flags.push('extra band not matching the cleavage products'); });
+      autoMarkers.filter(l => l.role === 'marker').forEach(l => { l.role = 'sample'; l.flags.push('extra band not matching the cleavage products'); });
     }
     const samples = lanes.filter(l => l.role === 'sample');
+    const untouched = samples.filter(l => !l.edited);
     const brighter = samples.filter(l => l.flags.includes('cleavage product brighter than parent'));
-    if (samples.length >= 3 && brighter.length > samples.length / 2) {
+    if (untouched.length >= 3 && brighter.filter(l => !l.edited).length > untouched.length / 2) {
       // Rare in a real row; usually the box includes wells or a band above the parents.
       brighter.forEach(l => l.flags.push('check band assignment'));
     }
@@ -682,7 +690,12 @@
       const fixed = ov.products[k];
       if (fixed != null) { prods.push({ y: fixed, found: true, fixed: true }); continue; }
       const off = offsets[k];
-      if (off == null) continue;
+      if (off == null) {
+        // No expected position (only hand-set products later on): hold the slot without a band of its own.
+        const next = ov.products.slice(k + 1).find(v => v != null);
+        prods.push({ y: Math.round((P + (next != null ? next : n - 1)) / 2), found: false, slotOnly: true });
+        continue;
+      }
       const lo = k === 0 ? Math.max(P + 3, P + off - (3 + 0.15 * off)) : P + (offsets[k - 1] + off) / 2;
       const hi = k === offsets.length - 1 ? P + off + 3 + 0.15 * off : P + (off + offsets[k + 1]) / 2;
       let c = -1;
@@ -697,7 +710,9 @@
         }
         if (best > 0) c = best;
       }
-      const found = c > P && c < n - 1 && isLocalMax(ps, c) && c > Math.round(lo) && c < Math.round(hi);
+      // Next to a removed or hand-placed band, flat background passes as a local maximum: ask for a real peak.
+      const solid = !(ov.removed.length || reserved.length) || prominence(ps, c, Math.max(8, c - P)) >= Math.max(3 * noise, 0.015 * (ps[P] - minOf(ps)));
+      const found = c > P && c < n - 1 && isLocalMax(ps, c) && c > Math.round(lo) && c < Math.round(hi) && solid;
       prods.push({ y: found ? c : Math.min(n - 1, Math.round(P + off)), found });
     }
 
@@ -711,7 +726,7 @@
     const below = 1.5 * (sortedPeaks.length > 1 ? sortedPeaks[sortedPeaks.length - 1] - sortedPeaks[sortedPeaks.length - 2] : above);
     // An undetected product only marks where it was expected; when that spot is another band it gets no segment.
     const collides = (y, i) => peaks.some((o, j) => j !== i && Math.abs(o - y) <= 3) || nearRemoved(y);
-    const bands = peaks.map((y, i) => ({ y, kind: i })).filter(b => b.kind === 0 || prods[b.kind - 1].found || !collides(b.y, b.kind))
+    const bands = peaks.map((y, i) => ({ y, kind: i })).filter(b => b.kind === 0 || prods[b.kind - 1].found || (!prods[b.kind - 1].slotOnly && !collides(b.y, b.kind)))
       .concat(ov.removed.filter(y => y > P - above && y < lowest + below && !peaks.some((p, i) => (i === 0 || prods[i - 1].found) && Math.abs(p - y) <= 2)).map(y => ({ y, kind: -1 })))
       .sort((a, b) => a.y - b.y || a.kind - b.kind);
     const ys = bands.map(b => b.y);
@@ -722,6 +737,7 @@
     if (manual) {
       valleys = q.lane.valleys.map(v => Math.min(n - 1, Math.max(0, Math.round(v - r.y0)))).sort((a, b) => a - b);
       flags.push('manual band boundaries');
+      if (bands.some((b, s) => b.kind >= 0 && !(valleys[s] < b.y && b.y < valleys[s + 1]))) flags.push('band boundary crosses a band');
     } else {
       if (q.lane.valleys) flags.push('manual band boundaries ignored: the number of bands changed');
       const firstGap = ys.length > 1 ? ys[1] - ys[0] : Math.max(6, Math.round(n * 0.15));
@@ -768,7 +784,8 @@
       flags.push('product ' + (k + 1) + ' not detected');
     }
     prods.forEach((x, k) => { if (faint[k]) flags.push('product ' + (k + 1) + ' faint'); });
-    if (!offsets.length) flags.push('no cleavage products found');
+    if (!offsets.length && !prods.some(x => x.found)) flags.push('no cleavage products found');
+    if (q.weakOffsets && prods.some((x, k) => x.found && !x.fixed && offsets[k] != null && q.weakOffsets.includes(offsets[k]))) flags.push('check band assignment');
     // Cleavage always yields both fragments: one without the other points to a non-specific band.
     if (!manual && ((prods.length === 2 && prods[0].found !== prods[1].found) ||
         (prm.products === 2 && prods.length === 1 && prods[0].found))) flags.push('only one cleavage product found');
@@ -811,6 +828,18 @@
       if (q.extraBand) flags.push('extra band not matching the cleavage products');
     }
     let role = q.lane.role;
+    // The role the lane would have without hand edits: the row's ladder vote counts this one.
+    let autoMarker = false;
+    if (!role) {
+      const Pa = ov.any && q.autoP != null ? q.autoP : P, promA = ps[Pa] - minOf(ps);
+      const matchesA = j => Math.abs(j - Pa) <= 4 || offsets.some(off => Math.abs(j - Pa - off) <= 3 + 0.15 * off) ||
+        (prm.products === 1 && offsets.length === 1 && j - Pa > offsets[0]);
+      if (q.ladderLike) autoMarker = q.isEnd || q.rowLanes < 3;
+      // fitsPattern describes the edited bands; without the edits only the unmatched bands decide.
+      else for (let j = 1; (q.isEnd || q.rowLanes < 3) && (ov.any || !q.fitsPattern) && j < n - 1; j++) {
+        if (isLocalMax(ps, j) && !matchesA(j) && prominence(ps, j, Math.max(10, Math.round(n / 4))) >= 0.25 * promA) { autoMarker = true; break; }
+      }
+    }
     if (!role && ov.any) role = 'sample';   // bands chosen by hand: the user treats this lane as a sample
     if (!role && q.ladderLike) {
       // Ladders sit at the ends of a row; an interior lane with extra strong bands is a sample with an extra band.
@@ -854,7 +883,7 @@
       profile: ps, corrected: removedIn.length ? pm : null, baseline, valleys, peaks, found: [true].concat(prods.map(x => x.found)), segKinds,
       fixed: [q.parentFixed].concat(prods.map(x => !!x.fixed)), removed: ov.removed.slice(), candidates: peakList(ps, noise),
       areas, heights, fc, role, flags, noise, saturated: sat, parentProm,
-      autoRole: !q.lane.role, ladderLike: !!q.ladderLike,
+      autoRole: !q.lane.role, ladderLike: !!q.ladderLike, autoMarker, edited: !!ov.any,
       editing: NaN, fcCorrected: fc
     };
   }

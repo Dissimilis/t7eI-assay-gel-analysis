@@ -197,7 +197,8 @@
 
     const rdv = new DataView(raw.buffer);
     const sample = bps === 8 ? i => raw[i] : bps === 16 ? i => rdv.getUint16(2 * i, le) : i => rdv.getFloat32(4 * i, le);
-    const total = w * h * spp;
+    const chans = spp >= 3 ? 3 : 1, total = w * h * chans;   // colour samples only, not alpha or extras
+    const eachSample = f => { for (let p = 0; p < w * h; p++) for (let c = 0; c < chans; c++) f(sample(p * spp + c)); };
     let lo = 0, hi = 255, bits = bps;
     let clipTop = null, clipBottom = null, quantum = 1, stored8 = false;
     if (bps === 16) {
@@ -205,7 +206,7 @@
       // that clipped leaves a pile of pixels at one value: that value is the real ceiling.
       const hist = new Uint32Array(65536);
       let max = 0, min = 65535, used = 0;
-      for (let i = 0; i < total; i++) { const v = sample(i); hist[v]++; used |= v; if (v > max) max = v; if (v < min) min = v; }
+      eachSample(v => { hist[v]++; used |= v; if (v > max) max = v; if (v < min) min = v; });
       quantum = used ? used & -used : 1;   // left-aligned 12-bit data only uses every 16th value
       const pile = (v, dir) => {
         if (hist[v] < Math.max(20, total * 2e-5)) return false;
@@ -223,7 +224,7 @@
       hi = 2 ** bits - 1;
     } else if (bps === 32) {
       lo = Infinity; hi = -Infinity;
-      for (let i = 0; i < total; i++) { const v = sample(i); if (v < lo) lo = v; if (v > hi) hi = v; }
+      eachSample(v => { if (!isFinite(v)) return; if (v < lo) lo = v; if (v > hi) hi = v; });
       if (!(hi > lo)) hi = lo + 1;
     }
     const scale = 255 / (hi - lo);
@@ -232,7 +233,7 @@
       let v;
       if (spp >= 3) v = 0.299 * sample(p * spp) + 0.587 * sample(p * spp + 1) + 0.114 * sample(p * spp + 2);
       else v = sample(p * spp);
-      v = (v - lo) * scale;
+      v = isFinite(v) ? (v - lo) * scale : 0;
       gray[p] = photometric === 0 ? 255 - v : v;
     }
     if (bps === 32) {
