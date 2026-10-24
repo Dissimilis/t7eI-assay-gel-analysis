@@ -193,7 +193,7 @@ test('regressions found in review: these lanes are right or warned', () => {
   // a primer dimer for the product.
   const cases = [[2789, 3, 2], [2726, 2, 2], [509, 2, 2], [617, 0, 1], [617, 1, 1], [617, 2, 1], [8, 0, 1], [449, 1, 1], [910, 2, 1],
     [205, 3, 1], [324, 0, 1], [324, 3, 1], [437, 1, 1], [620, 0, 1], [1204, 0, 1], [1115, 2, 1], [1553, 6, 1], [1565, 0, 1], [1565, 2, 1],
-    [2420, 3, 2]];
+    [2420, 3, 2], [7193, 0, 2], [6682, 0, 2], [2693, 11, 1], [3348, 3, 1], [3348, 4, 1], [3700, 2, 1], [6578, 3, 1], [7655, 0, 1], [7655, 1, 1]];
   for (const [seed, lane, products] of cases) {
     const g = t7Row(seed, { hard: true, products }), l = analyseRow(g.img, g.box, null, { products }).lanes[lane];
     assert.ok(l.role !== 'sample' || Math.abs(l.editing - g.truth[lane]) <= 10 || l.flags.some(T.isWarning), `seed ${seed} lane ${lane}: ${l.editing.toFixed(1)} vs ${g.truth[lane].toFixed(1)} [${l.flags}]`);
@@ -204,6 +204,13 @@ test('regressions found in review: these lanes are right or warned', () => {
   const l = analyseRow(g.img, g.box, i => (i === 2 ? { bands: { parent: truthParent, products: [null, null], removed: [] } } : {})).lanes[2];
   assert.ok(Math.abs(l.editing - g.truth[2]) <= 10 || l.flags.some(T.isWarning), `seed 79 lane 2 with the true parent: ${l.editing.toFixed(1)} vs ${g.truth[2].toFixed(1)} [${l.flags}]`);
   assert.ok(auto.lanes.length > 2);
+});
+
+test('rows of alternately bright and dim lanes: every lane found', () => {
+  for (const seed of [167, 2739]) {
+    const g = wildRow(seed, { products: 2 }), d = T.detectLanes(T.signalImage(g.img, 'dark'), g.img, g.box);
+    assert.equal(d.xs.length, g.truth.length, `seed ${seed}: ${d.xs}`);
+  }
 });
 
 test('lane order does not change any result', () => {

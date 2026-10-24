@@ -3,7 +3,7 @@
   'use strict';
 
   const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample, XLSX = window.T7EIXlsx;
-  const VERSION = '1.6.1';
+  const VERSION = '1.7.0';
   const STORE = 't7eI.params.v1';
   const $ = id => document.getElementById(id);
 
@@ -666,7 +666,7 @@
 
   function shortFlag(f) {
     return ({ 'parent saturated': 'saturated', 'product saturated': 'product saturated', 'weak lane': 'weak', 'band cut by the box edge': 'edge',
-      'band at the top of the box: a well?': 'well?', 'unassigned band inside the measured range': 'unassigned band', 'band above the parent': 'band above', 'one product and few lanes: bands not cross-checked': 'few lanes',
+      'band at the top of the box: a well?': 'well?', 'unassigned band inside the measured range': 'unassigned band', 'band above the parent': 'band above', 'one product and few lanes: bands not cross-checked': 'few lanes', 'parent lower than in nearby lanes': 'parent lower',
       'extra band not matching the cleavage products': 'extra band', 'check band assignment': 'check bands', 'no cleavage products found': 'no products',
       'manual band boundaries': 'edited', 'only one cleavage product found': 'one product', 'second product visible: set two products': 'second product?',
       'cleavage product brighter than parent': 'brighter product', 'manual band assignment': 'bands set',

@@ -51,7 +51,7 @@
     'extra band not matching the cleavage products', 'check band assignment', 'only one cleavage product found',
     'removed band overlaps a measured band', 'bands overlap: result depends on the baseline', 'band boundary crosses a band',
     'parent at a product position of the row', 'product positions differ from the row', 'result depends on the smoothing',
-    'one product and few lanes: bands not cross-checked']);
+    'one product and few lanes: bands not cross-checked', 'parent lower than in nearby lanes']);
   function isWarning(flag) { return WARNINGS.includes(flag) || /invalid|second product visible/.test(flag); }
 
   // ---------------------------------------------------------------- images
@@ -305,6 +305,13 @@
     };
     const centres = ls => ls.map(k => k.c).sort((a, b) => a - b).filter((x, i, a) => i === 0 || x - a[i - 1] >= 4);
     let lanes = pick(pitch ? 0.6 * pitch : 8), xs = centres(lanes);
+    if (pitch && xs.length >= 2) {
+      // Every other lane dim: the autocorrelation peaks at twice the spacing, and its separation hides
+      // all the dim lanes. Lanes picked at half that spacing, evenly about half the pitch apart, win.
+      const half = pick(0.3 * pitch), hx = centres(half);
+      const hg = hx.slice(1).map((x, i) => x - hx[i]);
+      if (hx.length >= 2 * xs.length - 1 && hg.every(g => g > 0.35 * pitch && g < 0.65 * pitch)) { lanes = half; xs = hx; pitch = median(hg); }
+    }
     // The autocorrelation needs several lanes; check it against the spacing of neighbouring lanes.
     if (xs.length >= 2) {
       const gaps = xs.slice(1).map((x, i) => x - xs[i]);
@@ -619,16 +626,26 @@
       for (let j = well; j < q.P - NEAR_BAND; j++) if (isLocalMax(q.ps, j) && prominence(q.ps, j, reach) >= Math.max(3 * q.noise, 0.05 * ref)) out.push(j);
       return out;
     };
+    // Positions found in two lanes or more; each lane gives a list of positions.
+    const common = (lists, tol) => lists.flat().filter(v => lists.filter(l => l.some(w => Math.abs(w - v) <= tol)).length >= 2);
+    const nearOf = q => usable.filter(o => o !== q && Math.abs(o.lane.x - q.lane.x) <= 4.5 * pitch);
+    // Parent positions that two nearby lanes share.
+    const nearParents = ctx ? ctx.nearParents : pre.map(q => (usable.length < 3 ? [] : common(nearOf(q).map(o => [o.P]), 2)));
     const upper = ctx ? ctx.upper : (() => {
       const bands = pre.map(aboveOf);
-      // Positions found in two lanes or more; each lane gives a list of positions.
-      const common = (lists, tol) => lists.flat().filter(v => lists.filter(l => l.some(w => Math.abs(w - v) <= tol)).length >= 2);
-      return pre.map(q => {
-        const near = usable.filter(o => o !== q && Math.abs(o.lane.x - q.lane.x) <= 4.5 * pitch);
+      // A band above the parent holding a quarter of the parent's height or more counts on its own:
+      // that lane's parent is in doubt, and so are lanes with any band there.
+      const strong = pre.map((q, i) => bands[i].filter(j => prominence(q.ps, j, reach) >= 0.25 * prominence(q.ps, q.P, reach)));
+      return pre.map((q, i) => {
         if (usable.length < 3) return [];
-        return common(near.map(o => [o.P]), 2).concat(common(near.map(o => [o.P].concat(bands[pre.indexOf(o)])), SAME_BAND));
+        const near = nearOf(q);
+        return nearParents[i].concat(common(near.map(o => [o.P].concat(bands[pre.indexOf(o)])), SAME_BAND), near.flatMap(o => strong[pre.indexOf(o)]));
       });
     })();
+    // Parent positions under a strong band above, in a nearby lane: lanes with their parent there too
+    // share the doubt even when their own faint parent shows only as a shoulder.
+    const doubted = ctx ? ctx.doubted : pre.map(q => (usable.length < 3 ? [] : nearOf(q).filter(o => aboveOf(o).some(j =>
+      prominence(o.ps, j, reach) >= 0.15 * prominence(o.ps, o.P, reach))).map(o => o.P)));
     const lanes = pre.map((q, i) => {
       let offs = q.ownOffsets || offsets || ownOffsets(q, prm.products);
       // A parent chosen by hand that none of the row's product positions fit (the row learnt them
@@ -637,8 +654,11 @@
       const l = analyzeLane(q, offs, n, r, img, prm);
       if (q.offPattern) l.flags.push('product positions differ from the row');
       if (l.role === 'sample' && atProduct(q, offs)) l.flags.push('parent at a product position of the row');
+      // Parents of one amplicon line up: a parent well below the one two nearby lanes share is more
+      // likely a product taken for a faint parent (high editing), or a different amplicon.
+      if (l.role === 'sample' && nearParents[i].some(u => q.P - u >= 10) && !l.flags.includes('parent at a product position of the row')) l.flags.push('parent lower than in nearby lanes');
       if (l.role === 'sample' && !l.flags.includes('band above the parent') &&
-          (upper[i].some(u => u < q.P - NEAR_BAND && bandAt(q, u, SAME_BAND, 0.4)) ||
+          (upper[i].some(u => u < q.P - NEAR_BAND && bandAt(q, u, SAME_BAND, 0.4)) || doubted[i].some(p => Math.abs(p - q.P) <= SAME_BAND) ||
            (!l.found.slice(1).some(Boolean) && offs.some(off => bandAt(q, q.P - off, offTol(off), 1))))) l.flags.push('band above the parent');
       q.offs = offs;
       return l;
@@ -666,6 +686,31 @@
       if (l.role === 'sample' && cut(i) && lower.some(o => above(pre[i].offs, o)) && !l.flags.includes('check band assignment')) l.flags.push('check band assignment');
     });
 
+    // Lanes of one product pattern find each product at about the same distance below their parent.
+    // When those distances fall into two groups well apart, one group took another band (a primer
+    // dimer, a second product) for the product: the smaller group warns, both when they are equal.
+    const split = ctx ? ctx.split : (() => {
+      const out = new Set();
+      const groups = new Map();
+      pre.forEach((q, i) => { if (lanes[i].role === 'sample' && q.offs && q.offs.length) { const g = groups.get(q.offs) || []; g.push(i); groups.set(q.offs, g); } });
+      for (const idx of groups.values()) {
+        if (idx.length < 4) continue;
+        for (let k = 1; k <= prm.products; k++) {
+          // Products of 3% of the lane or more: a faint band near the noise may sit anywhere.
+          const solid = i => lanes[i].found[k] && lanes[i].areas[k] >= 0.03 * lanes[i].areas.reduce((s, v) => s + v, 0);
+          const at = idx.filter(solid).map(i => ({ i, off: lanes[i].peaks[k] - lanes[i].peaks[0] })).sort((a, b) => a.off - b.off);
+          if (at.length < 4) continue;
+          let cut = -1, gap = 0;
+          for (let j = 1; j < at.length; j++) if (at[j].off - at[j - 1].off > gap) { gap = at[j].off - at[j - 1].off; cut = j; }
+          if (cut < 0) continue;
+          const lo = at.slice(0, cut), hi = at.slice(cut);
+          if (gap <= Math.max(2 * SAME_BAND, offTol(at[cut - 1].off)) || lo.length < 2 || hi.length < 2) continue;
+          (lo.length < hi.length ? lo : hi.length < lo.length ? hi : at).forEach(x => out.add(x.i));
+        }
+      }
+      return Array.from(out);
+    })();
+    split.forEach(i => { if (!lanes[i].flags.includes('check band assignment')) lanes[i].flags.push('check band assignment'); });
     const auto = lanes.filter(l => l.autoRole);
     const autoMarkers = auto.filter(l => l.role === 'marker' && !l.ladderLike);
     if (auto.length >= 3 && autoMarkers.length > auto.length / 2) {
@@ -683,7 +728,7 @@
     const brighterRow = ctx ? ctx.brighterRow : samples.length >= 3 && brighter.length > samples.length / 2;
     // Rare in a real row; usually the box includes wells or a band above the parents.
     if (brighterRow) brighter.forEach(l => { if (!l.flags.includes('check band assignment')) l.flags.push('check band assignment'); });
-    const context = { main: pre.main, P: pre.map(q => q.P), brighterRow, upper, lower };
+    const context = { main: pre.main, P: pre.map(q => q.P), brighterRow, upper, lower, nearParents, doubted, split };
     return { region: r, pitch, half, offsets: offsets || [], shared: !!(offsets && offsets.length), lanes, context };
   }
 
@@ -1063,11 +1108,7 @@
     const total = areas.reduce((s, v) => s + v, 0);
     const fc = total > 0 ? (total - areas[0]) / total : 0;
     if (fc === 0 && offsets.length && role === 'sample') flags.push('no cleavage');
-    // Both fragments come from the same cut molecules, so the shorter one (product 2) carries less dye
-    // than the longer one. Product 2 at more than twice product 1 is more likely a primer dimer or a
-    // second PCR product than a cleavage product.
-    if (role === 'sample' && prods.length === 2 && prods[0].found && prods[1].found && areas[2] > 2 * areas[1] &&
-        areas[1] + areas[2] >= 0.15 * total && !flags.includes('check band assignment')) flags.push('check band assignment');
+
     if (fc > 0 && role === 'sample') {
       // Bands that run into each other: products on the tail of the parent lose most of their area
       // to a baseline through the valleys. Measure again on a straight line between the outer
@@ -1082,6 +1123,11 @@
         if (bands[s].kind >= 0 && areas[bands[s].kind] > 0) alt[bands[s].kind] = sum;
       }
       const altTotal = alt.reduce((s, v) => s + v, 0);
+      // Both fragments come from the same cut molecules, so the shorter one (product 2) carries less
+      // dye than the longer one. Product 2 well above product 1 on both baselines is more likely a
+      // primer dimer or a second PCR product than a cleavage product.
+      if (prods.length === 2 && prods[0].found && prods[1].found && areas[1] + areas[2] >= 0.15 * total &&
+          areas[2] > 1.3 * areas[1] && alt[2] > 1.3 * alt[1] && !flags.includes('check band assignment')) flags.push('check band assignment');
       const e1 = editingGuschin(fc), e2 = altTotal > 0 ? editingGuschin((altTotal - alt[0]) / altTotal) : e1;
       const d = Math.abs(e1 - e2);
       let overlap = d >= OVERLAP.large || (d >= OVERLAP.points && Math.max(e1, e2) >= OVERLAP.ratio * Math.min(e1, e2));
