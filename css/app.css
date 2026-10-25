@@ -19,6 +19,18 @@ a:hover { color: var(--color-accent-800); }
 }
 .top .btn, .file-tag { white-space: nowrap; flex-shrink: 0; }
 .file-tag { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+/* Title: a short entrance, then a slow, faint sheen like a band under the transilluminator. */
+.brand-name {
+  background: linear-gradient(100deg, var(--color-text) 42%, var(--color-accent) 50%, var(--color-text) 58%) 100% 0 / 250% 100%;
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  animation: brand-in .7s ease-out both, brand-sheen 9s ease-in-out 1.2s infinite;
+}
+.brand-sub { animation: brand-in .7s ease-out .25s both; }
+@keyframes brand-in { from { opacity: 0; transform: translateY(4px); } }
+@keyframes brand-sheen { 0%, 70% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .brand-name, .brand-sub { animation: none; }
+}
 
 .grid {
   max-width: 1440px; margin: 0 auto; padding: 8px 28px 32px;
