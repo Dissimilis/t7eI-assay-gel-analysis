@@ -1,5 +1,5 @@
 {
-  "name": "t7eI-gel-analysis",
+  "name": "t7eI-assay-gel-analysis",
   "version": "1.7.8",
   "description": "Densitometry of T7E1 mismatch-cleavage gels in the browser",
   "private": true,
