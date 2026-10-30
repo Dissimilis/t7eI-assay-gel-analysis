@@ -396,28 +396,44 @@
   }
 
   /** Piecewise-linear baseline through nodes at the valley indices. */
-  function baselineNodes(ps, valleys, method, k) {
+  /** The baseline level at a profile index for the chosen background method, as a function. */
+  function baselineNodeAt(ps, valleys, method, k) {
     const first = valleys[0], last = valleys[valleys.length - 1];
     const env = i => last === first ? ps[first] : ps[first] + (ps[last] - ps[first]) * (i - first) / (last - first);
-    if (method === 'envelope') return valleys.map(env);
+    if (method === 'envelope') return env;
     if (method === 'blend') {
       const P = argmax(ps, first, last), pm = Math.max(1e-6, ps[P] - env(P));
-      return valleys.map(i => {
+      return i => {
         const depth = Math.max(0, ps[i] - env(i));
         const w = Math.exp(-depth / (k * pm));
         return w * ps[i] + (1 - w) * env(i);
-      });
+      };
     }
-    return valleys.map(i => ps[i]);
+    return i => ps[i];
   }
 
-  function interpBaseline(n, valleys, nodes) {
-    const b = new Float32Array(n).fill(NaN);
-    for (let s = 0; s < valleys.length - 1; s++) {
-      const a = valleys[s], c = valleys[s + 1];
-      for (let i = a; i <= c; i++) b[i] = c === a ? nodes[s] : nodes[s] + (nodes[s + 1] - nodes[s]) * (i - a) / (c - a);
+  // A band's foot on one side: walking from the peak towards `limit`, the first point where the
+  // descent has flattened to 3% of its steepest or the profile turns up, once the profile has come
+  // down by three sigma of noise and a tenth of the drop to the limit (so the flat top of a clipped
+  // band has no foot); then the lowest point within a quarter of that distance again, so a slow
+  // flank base or a tail is followed to its end. On a flat ground that is the band's base; on a
+  // smear it is where the band ends and the smear goes on, which is where hand ImageJ work closes
+  // the peak. Tested against hand ImageJ values: 3% with the quarter keeps the E-Gel rows at 1.5 and
+  // 0.4 points and reads a band on a smear within 0.5 points; a tenth cuts tails (row 2 to 1.2
+  // points), no extension leaves a slow base 1-2 grey above its shelf.
+  const FOOT = 0.03, FOOT_REACH = 0.25;
+  function footOf(ps, peak, limit, noise) {
+    const d = Math.sign(limit - peak);
+    if (!d) return peak;
+    const down = Math.max(3 * noise, 0.1 * (ps[peak] - ps[limit]));
+    let steepest = 0, stop = limit;
+    for (let i = peak + d; i !== limit; i += d) {
+      const s = (ps[i - d] - ps[i + d]) / 2;   // descent per pixel, away from the peak
+      if (s > steepest) steepest = s;
+      if (steepest > 0 && ps[peak] - ps[i] >= down && s <= FOOT * steepest) { stop = i; break; }
     }
-    return b;
+    const reach = stop + d * Math.round(FOOT_REACH * Math.abs(stop - peak));
+    return d > 0 ? argmin(ps, stop, Math.min(limit, reach)) : argmin(ps, Math.max(limit, reach), stop);
   }
 
   // ---------------------------------------------------------------- formulas
@@ -1023,10 +1039,10 @@
     const pm = removedIn.length ? withoutBands(ps, removedIn) : ps;   // profile used for valleys and areas
     let valleys;
     const manual = !!(q.lane.valleys && q.lane.valleys.length === bands.length + 1);
+    const measured = b => b.kind === 0 || (b.kind > 0 && prods[b.kind - 1].found);   // not the place an undetected product was expected
     if (manual) {
       valleys = q.lane.valleys.map(v => Math.min(n - 1, Math.max(0, Math.round(v - r.y0)))).sort((a, b) => a - b);
       flags.push('manual band boundaries');
-      const measured = b => b.kind === 0 || (b.kind > 0 && prods[b.kind - 1].found);   // not the place an undetected product was expected
       if (bands.some((b, s) => measured(b) && !(valleys[s] < b.y && b.y < valleys[s + 1]))) flags.push('band boundary crosses a band');
     } else {
       if (q.lane.valleys) flags.push('manual band boundaries ignored: the number of bands changed');
@@ -1038,13 +1054,27 @@
       for (let i = 1; i < valleys.length; i++) if (valleys[i] < valleys[i - 1]) valleys[i] = valleys[i - 1];
     }
 
-    const nodes = baselineNodes(pm, valleys, prm.background, prm.blendK);
-    const baseline = interpBaseline(n, valleys, nodes);
+    // A measured band is summed between its feet, not from boundary to boundary: a band on a smear
+    // or on another band's tail would otherwise take the whole plateau under it. The boundaries
+    // only bound how far a band may reach. Outside the feet the baseline follows the profile, so
+    // the plot shows what is counted.
+    const nodeAt = baselineNodeAt(pm, valleys, prm.background, prm.blendK);
+    const clampTo = (i, s) => Math.max(valleys[s], Math.min(valleys[s + 1], i));
+    const feet = bands.map((b, s) => measured(b)
+      ? [clampTo(footOf(pm, b.y, valleys[s], noise), s), clampTo(footOf(pm, b.y, valleys[s + 1], noise), s)]
+      : [valleys[s], valleys[s + 1]]);
+    const sP = bands.findIndex(b => b.kind === 0);
+    let sLast = bands.length - 1;
+    while (sLast > sP && !measured(bands[sLast])) sLast--;
+    const first = feet[sP][0], last = feet[sLast][1];   // the measured range: the parent's upper foot to the last band's lower foot
+    const baseline = new Float32Array(n).fill(NaN);
     const areas = peaks.map(() => 0);
-    for (let s = 0; s < valleys.length - 1; s++) {
+    for (let s = 0; s < bands.length; s++) {
+      const [lo, hi] = feet[s], nLo = nodeAt(lo), nHi = nodeAt(hi);
+      for (let i = valleys[s]; i <= valleys[s + 1]; i++) baseline[i] = i < lo || i > hi ? pm[i] : hi === lo ? nLo : nLo + (nHi - nLo) * (i - lo) / (hi - lo);
       let sum = 0;
-      const end = s === valleys.length - 2 ? valleys[s + 1] : valleys[s + 1] - 1;
-      for (let i = valleys[s]; i <= end; i++) sum += Math.max(0, pm[i] - baseline[i]);
+      const end = s === bands.length - 1 || hi < valleys[s + 1] ? hi : hi - 1;   // a shared boundary is counted once
+      for (let i = lo; i <= end; i++) sum += Math.max(0, pm[i] - baseline[i]);
       if (bands[s].kind >= 0) areas[bands[s].kind] = sum;   // a removed band's area is not counted
     }
     const segKinds = bands.map(b => b.kind);
@@ -1066,7 +1096,7 @@
       if (!x.found) { areas[k + 1] = 0; flags.push('product ' + (k + 1) + ' not detected'); }
     });
 
-    const heights = peaks.map((y, i) => ps[y] - (isNaN(baseline[y]) ? nodes[Math.min(i, nodes.length - 1)] : baseline[y]));
+    const heights = peaks.map(y => ps[y] - (isNaN(baseline[y]) ? nodeAt(y) : baseline[y]));
     const faint = prods.map((x, k) => x.found && !x.fixed && heights[k + 1] < prm.faintSNR * noise);
     if (prods.length === 2 && prods[0].found !== prods[1].found && faint[0] !== faint[1]) {
       // A single faint "product" without its partner is noise, as in an uncut control.
@@ -1095,15 +1125,15 @@
 
     // Automatic role: a ladder has strong bands that match neither the parent nor the products.
     {
-      const lo = minOf(ps), hP = ps[P] - lo, last = valleys[valleys.length - 1], reach = reachOf(n);
+      const lo = minOf(ps), hP = ps[P] - lo, lastV = valleys[valleys.length - 1], reach = reachOf(n);
       const lastHeight = Math.max(heights[heights.length - 1], noise);
-      // A boundary at the end of the profile while the signal is still sloping there means the box cut a band tail.
+      // A band's foot at the end of the profile while the signal is still sloping there means the box cut the band.
       // Pixel noise from curvature: a short box full of band flanks would inflate the slope-based estimate.
       // The edge level is read from the smoothed profile, so it is judged against that profile's own noise.
       const en = Math.max(1e-3, curvatureNoise(q.p)), enS = Math.max(1e-3, curvatureNoise(ps));
-      const topCut = valleys[0] <= 1 && n > 4 && ps[3] - ps[0] > 3 * en && ps[0] - lo > Math.max(0.04 * hP, 3 * enS);
+      const topCut = first <= 1 && n > 4 && ps[3] - ps[0] > 3 * en && ps[0] - lo > Math.max(0.04 * hP, 3 * enS);
       const bottomCut = last >= n - 2 && n > 4 && ps[n - 4] - ps[n - 1] > 3 * en && ps[n - 1] - lo > Math.max(0.04 * lastHeight, 3 * enS);
-      if (P <= 1 || (valleys[0] <= 1 && ps[0] - lo > 0.2 * hP) || topCut || bottomCut || (last >= n - 2 && ps[n - 1] - lo > 0.5 * lastHeight + 3 * noise)) {
+      if (P <= 1 || (first <= 1 && ps[0] - lo > 0.2 * hP) || topCut || bottomCut || (last >= n - 2 && ps[n - 1] - lo > 0.5 * lastHeight + 3 * noise)) {
         flags.push('band cut by the box edge');
       } else if (P <= Math.max(3, 0.06 * n)) {
         flags.push('band at the top of the box: a well?');
@@ -1112,7 +1142,7 @@
       // Look a little below the last measured band too: a real product can be pushed out of the range.
       // With a product missing, the band it should have been may sit anywhere below: look to the end.
       const lastY = Math.max(...peaks), tail = prods.some(x => !x.found) ? n - 2 : Math.min(n - 2, Math.round(lastY + 0.6 * (lastY - P)));
-      for (let j = valleys[0] + 1; j <= Math.max(last - 1, tail); j++) {
+      for (let j = valleys[0] + 1; j <= Math.max(lastV - 1, tail); j++) {
         if (!isPeak(j) && isLocalMax(ps, j) && prominence(ps, j, reach) >= Math.max(4 * noise, 0.04 * hP)) { flags.push('unassigned band inside the measured range'); break; }
       }
       const ref = prominence(ps, argmax(ps, 0, n - 1), reach), none = !prods.some(x => x.found), well = Math.max(3, 0.08 * n);
@@ -1162,14 +1192,14 @@
       // Bands that run into each other: products on the tail of the parent lose most of their area
       // to a baseline through the valleys. Measure again on a straight line between the outer
       // boundaries; when the two disagree strongly, the result depends on the baseline.
-      const v0 = valleys[0], vN = valleys[valleys.length - 1];
+      const v0 = first, vN = last;
       const outer = i => (vN > v0 ? pm[v0] + (pm[vN] - pm[v0]) * (i - v0) / (vN - v0) : pm[v0]);
       const alt = areas.map(() => 0);
-      for (let s = 0; s < valleys.length - 1; s++) {
-        const end = s === valleys.length - 2 ? valleys[s + 1] : valleys[s + 1] - 1;
+      for (let s = 0; s < bands.length; s++) {
+        if (bands[s].kind < 0 || !(areas[bands[s].kind] > 0)) continue;
         let sum = 0;
-        for (let i = valleys[s]; i <= end; i++) sum += Math.max(0, pm[i] - outer(i));
-        if (bands[s].kind >= 0 && areas[bands[s].kind] > 0) alt[bands[s].kind] = sum;
+        for (let i = feet[s][0]; i <= feet[s][1]; i++) sum += Math.max(0, pm[i] - outer(i));
+        alt[bands[s].kind] = sum;
       }
       const altTotal = alt.reduce((s, v) => s + v, 0);
       // Both fragments come from the same cut molecules, so the shorter one (product 2) carries less
@@ -1197,7 +1227,7 @@
 
     return {
       x: q.lane.x, a: q.a, b: q.b, y0: r.y0,
-      profile: ps, corrected: removedIn.length ? pm : null, baseline, valleys, peaks, found: [true].concat(prods.map(x => x.found)), segKinds,
+      profile: ps, corrected: removedIn.length ? pm : null, baseline, valleys, feet, peaks, found: [true].concat(prods.map(x => x.found)), segKinds,
       fixed: [q.parentFixed].concat(prods.map(x => !!x.fixed)), removed: ov.removed.slice(), candidates: peakList(ps, noise),
       areas, heights, fc, role, flags, noise, saturated: sat, parentProm,
       autoRole: !q.lane.role, ladderLike: !!q.ladderLike, edited: !!ov.any,

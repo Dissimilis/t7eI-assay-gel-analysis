@@ -21,14 +21,16 @@ const JOBS = [
   ['UVP07853 top', 'gel-UVP07853.tif', { x0: 100, x1: 1280, y0: 350, y1: 472 }],
   ['UVP07853 bottom', 'gel-UVP07853.tif', { x0: 100, x1: 1100, y0: 690, y1: 845 }],
   ['IM002286 row 1', 'pgm', { x0: 430, x1: 1230, y0: 505, y1: 625 }],
-  ['IM002286 row 2', 'pgm', { x0: 430, x1: 975, y0: 880, y1: 1000 }]
+  ['IM002286 row 2', 'pgm', { x0: 430, x1: 975, y0: 880, y1: 1000 }],
+  // The 200 bp product sits on a smear; the box ends just under it (gel-IM003690.pgm: the photo's luma)
+  ['IM003690 bottom', 'gel-IM003690.pgm', { x0: 480, x1: 1260, y0: 914, y1: 1105 }]
 ];
 
 const cache = {};
 async function image(file) {
   if (cache[file]) return cache[file];
-  if (file === 'pgm') {
-    const b = fs.readFileSync(process.env.T7E1_GEL_PGM);
+  if (file === 'pgm' || /\.pgm$/.test(file)) {
+    const b = fs.readFileSync(file === 'pgm' ? process.env.T7E1_GEL_PGM : path.join(dir, file));
     const hd = b.slice(0, 32).toString('latin1').split(/\s+/), w = +hd[1], h = +hd[2];
     return (cache[file] = T.makeImage(Float32Array.from(b.slice(b.length - w * h)), w, h));
   }

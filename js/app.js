@@ -3,7 +3,7 @@
   'use strict';
 
   const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample, XLSX = window.T7EIXlsx;
-  const VERSION = '1.7.8';
+  const VERSION = '1.8.0';
   const STORE = 't7eI.params.v1';
   const $ = id => document.getElementById(id);
 

@@ -81,7 +81,7 @@ test('manual valleys override the automatic ones', () => {
   const img = T.makeImage(s.gray, s.w, s.h);
   const auto = T.analyze(img, rows, { polarity: 'dark' }).rows[0].lanes[1];
   const v = auto.valleys.map(i => i + auto.y0);
-  v[1] -= 3;
+  v[1] = auto.y0 + auto.peaks[0] + 4;   // into the parent's lower flank: a boundary only bounds a band, so it must pass the band's foot to change the area
   const lanes = rows[0].lanes.map((l, i) => i === 1 ? Object.assign({}, l, { valleys: v }) : l);
   const manual = T.analyze(img, [Object.assign({}, rows[0], { lanes })], { polarity: 'dark' }).rows[0].lanes[1];
   assert.ok(manual.flags.includes('manual band boundaries'));
@@ -552,6 +552,16 @@ test('a band boundary dragged past a band is flagged', () => {
   v[1] = 70;   // past product 1 at 60
   const dragged = analyseLanes(img, box, i => (i === 1 ? { valleys: v } : {})).lanes[1];
   assert.ok(dragged.flags.includes('band boundary crosses a band'), `[${dragged.flags.join('; ')}]`);
+});
+
+test('a product on a broad smear is measured on its own base, not with the plateau under it', () => {
+  // Four lanes at 30% editing; lane 2 also carries a wide smear of small fragments whose top lies just
+  // below product 2, as on a real gel photo (reference gel IM003690). The box ends inside the smear.
+  // Summed from boundary to boundary the plateau under product 2 would read as product, 10 points high.
+  const lanes = [60, 160, 260, 360].map((x, i) => ({ x, bands: t7Bands(30, i === 1 ? [[112, 0.12, 22]] : []) }));
+  const row = analyseBox(bandGel(lanes, { w: 500 }), { x0: 0, x1: 500, y0: 5, y1: 125 });
+  const clean = row.lanes[0].editing, smeared = row.lanes[1].editing;
+  assert.ok(Math.abs(smeared - clean) <= 1.5, `smeared lane ${smeared.toFixed(1)} vs clean ${clean.toFixed(1)} [${row.lanes[1].flags.join('; ')}]`);
 });
 
 // Safety checks that no other test would miss if they broke.

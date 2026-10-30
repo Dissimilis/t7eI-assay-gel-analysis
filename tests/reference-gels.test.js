@@ -59,6 +59,30 @@ test('UVP10523: removing the extra band in lane 14 restores the expected product
   res.lanes.forEach((x, i) => { if (i !== 14) assert.deepEqual([x.editing, x.peaks], [auto.lanes[i].editing, auto.lanes[i].peaks], 'lane ' + i); });
 });
 
+// Gel photo with the 200 bp product on a broad smear (gel-IM003690.pgm is the photo's luma). The box
+// starts under two unrelated bands above the parent and ends just under the 200 bp band. Hand ImageJ
+// values for the lanes the analyst could measure; the others are smeared or lack a band.
+function loadPgm(name) {
+  const b = fs.readFileSync(ref(name));
+  const hd = b.slice(0, 32).toString('latin1').split(/\s+/), w = +hd[1], h = +hd[2];
+  return T.makeImage(Float32Array.from(b.slice(b.length - w * h)), w, h);
+}
+
+test('IM003690: a product on a smear reads as by hand; the smeared lanes warn', { skip: !fs.existsSync(ref('gel-IM003690.pgm')) }, () => {
+  const img = loadPgm('gel-IM003690.pgm');
+  const hand = [33, 32, null, 18, 37, null, null];   // lanes after the ladder; null: not measurable by hand
+  for (const y1 of [1105, 1125]) {   // the box ending just under the band, and 20 px into the smear below it
+    const res = analyse(img, { x0: 480, x1: 1260, y0: 914, y1 });
+    assert.equal(res.lanes[0].role, 'marker', 'ladder');
+    hand.forEach((h, i) => {
+      const l = res.lanes[i + 1], warned = l.flags.some(T.isWarning), tag = `box to ${y1}, lane ${i + 2}: ${l.editing.toFixed(1)} [${l.flags.join('; ')}]`;
+      if (h == null) assert.ok(warned, tag + ' should warn');
+      else if (h === 18) assert.ok(warned || Math.abs(l.editing - h) <= 1.5, tag + ' vs hand ' + h);   // a weak lane
+      else assert.ok(Math.abs(l.editing - h) <= 1.5, tag + ' vs hand ' + h);
+    });
+  }
+});
+
 test('IM002717: faint products next to clipped parents are found', { skip: !fs.existsSync(ref('gel-IM002717.tif')) }, async () => {
   const res = analyse(await load('gel-IM002717.tif'), { x0: 580, x1: 1640, y0: 640, y1: 790 });
   assert.equal(res.lanes[0].role, 'marker');
