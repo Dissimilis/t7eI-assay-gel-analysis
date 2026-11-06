@@ -3,7 +3,7 @@
   'use strict';
 
   const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample, XLSX = window.T7EIXlsx;
-  const VERSION = '1.8.0';
+  const VERSION = '1.8.1';
   const STORE = 't7eI.params.v1';
   const $ = id => document.getElementById(id);
 
@@ -192,17 +192,8 @@
     els.ov.width = img.w; els.ov.height = img.h;
     const ctx = els.img.getContext('2d');
     const id = ctx.createImageData(img.w, img.h);
-    let lo = 0, hi = 255;
-    if (img.bits > 8) {
-      // Stretch only the display of high bit-depth images; measurement uses the raw values.
-      const s = [];
-      const step = Math.max(1, Math.floor(img.gray.length / 50000));
-      for (let i = 0; i < img.gray.length; i += step) s.push(img.gray[i]);
-      s.sort((a, b) => a - b);
-      lo = s[Math.floor(s.length * 0.002)]; hi = s[Math.floor(s.length * 0.998)];
-      if (hi <= lo) { lo = 0; hi = 255; }
-    }
-    const k = 255 / (hi - lo);
+    // Show the image as it is: no contrast stretch, for any bit depth.
+    const lo = 0, k = 1;
     state.disp = { lo, k };
     for (let i = 0, j = 0; i < img.gray.length; i++, j += 4) {
       const v = clamp((img.gray[i] - lo) * k, 0, 255);
