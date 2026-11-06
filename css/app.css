@@ -200,4 +200,11 @@ a:hover { color: var(--color-accent-800); }
 .lane-tools .field-head { margin: 0; }
 .field-inline .field-head { margin: 0; }
 .lane-tools .tip { left: auto; right: 0; }
+/* Column help in the results table: the header text opens the tip, placed against the window so the scrolling table does not clip it. */
+.th-info {
+  display: inline; width: auto; height: auto; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit;
+  text-decoration: underline dotted color-mix(in srgb, currentColor 55%, transparent); text-underline-offset: 3px;
+}
+.th-info:hover, .th-info:focus-visible, .th-info[aria-expanded="true"] { background: none; color: var(--color-text); text-decoration-style: solid; }
+.tip.tip-fixed { position: fixed; right: auto; white-space: normal; font-weight: 400; text-align: left; }
 .zoom[aria-pressed="true"] { background: var(--color-accent); color: var(--color-bg); border-color: var(--color-accent); }

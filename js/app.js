@@ -3,7 +3,7 @@
   'use strict';
 
   const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample, XLSX = window.T7EIXlsx;
-  const VERSION = '1.9.0';
+  const VERSION = '1.9.1';
   const STORE = 't7eI.params.v2';
   const $ = id => document.getElementById(id);
 
@@ -1047,6 +1047,19 @@
   });
   document.addEventListener('click', e => { if (!e.target.closest('.tip')) closeTips(null); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeTips(null); });
+  // Column help in the results table: placed against the window, under its header and inside the screen.
+  const headerTips = Array.from(document.querySelectorAll('.th-info'));
+  const placeTip = b => {
+    const tip = b.nextElementSibling, r = b.getBoundingClientRect();
+    const w = Math.min(330, window.innerWidth - 40);
+    tip.style.left = clamp(r.left, 16, Math.max(16, window.innerWidth - w - 16)) + 'px';
+    tip.style.top = (r.bottom + 4) + 'px';
+  };
+  headerTips.forEach(b => ['pointerenter', 'focus', 'click'].forEach(ev => b.addEventListener(ev, () => placeTip(b))));
+  // A pinned tip follows its header when the page or the table scrolls.
+  const replaceTips = () => headerTips.forEach(b => { if (b.getAttribute('aria-expanded') === 'true') placeTip(b); });
+  window.addEventListener('scroll', replaceTips, { capture: true, passive: true });
+  window.addEventListener('resize', replaceTips);
 
   els.loadBtn.addEventListener('click', () => els.fileInput.click());
   els.fileInput.addEventListener('change', () => { loadFile(els.fileInput.files[0]); els.fileInput.value = ''; });

@@ -137,7 +137,17 @@
       <div class="table-wrap">
         <table class="table results">
           <thead>
-            <tr><th>Lane</th><th>Label</th><th class="num">Parent</th><th class="num">Cut 1</th><th class="num">Cut 2</th><th class="num">Fraction</th><th class="num">% edit</th><th class="bar-col"></th><th>QC</th></tr>
+            <tr>
+              <th><button type="button" class="info th-info" aria-describedby="tip-colLane">Lane</button><span class="tip tip-fixed" role="tooltip" id="tip-colLane">Row · lane: 2·5 is the fifth lane from the left in the second row you drew. Click a line of the table to show that lane's profile.</span></th>
+              <th><button type="button" class="info th-info" aria-describedby="tip-colLabel">Label</button><span class="tip tip-fixed" role="tooltip" id="tip-colLabel">Your name for the lane, used in the CSV, XLSX and Copy results. Click and type. Left empty, the lane keeps the number shown (M for a ladder).</span></th>
+              <th class="num"><button type="button" class="info th-info" aria-describedby="tip-colParent">Parent</button><span class="tip tip-fixed" role="tooltip" id="tip-colParent">Area of the uncut parent band above the baseline, summed between the band's feet (grey level × pixels). Only its ratio to the products counts, so the unit does not matter.</span></th>
+              <th class="num"><button type="button" class="info th-info" aria-describedby="tip-colCut1">Cut 1</button><span class="tip tip-fixed" role="tooltip" id="tip-colCut1">Area of cleavage product 1, the larger fragment, the first product under the parent. Same units as Parent.</span></th>
+              <th class="num"><button type="button" class="info th-info" aria-describedby="tip-colCut2">Cut 2</button><span class="tip tip-fixed" role="tooltip" id="tip-colCut2">Area of cleavage product 2, the smaller fragment, further down. Shows — when Cleavage products is set to One.</span></th>
+              <th class="num"><button type="button" class="info th-info" aria-describedby="tip-colFraction">Fraction</button><span class="tip tip-fixed" role="tooltip" id="tip-colFraction">Fraction cleaved, f = (cut 1 + cut 2) / (parent + cut 1 + cut 2). With one product: cut 1 / (parent + cut 1).</span></th>
+              <th class="num"><button type="button" class="info th-info" aria-describedby="tip-colEdit">% edit</button><span class="tip tip-fixed" role="tooltip" id="tip-colEdit">Estimated editing, 100 × (1 − √(1 − f)) (Guschin 2010, NEB protocol). The table shows one decimal; exports and Copy results keep two. In the warning colour when the parent band is saturated: the value is then an upper bound.</span></th>
+              <th class="bar-col"></th>
+              <th><button type="button" class="info th-info" aria-describedby="tip-colQC">QC</button><span class="tip tip-fixed" role="tooltip" id="tip-colQC">Checks on the lane. Warnings, in the warning colour, mean the value needs a look before you use it; grey notes are for information. Point at a lane's QC cell for the full text. The documentation on GitHub explains each one.</span></th>
+            </tr>
           </thead>
           <tbody id="resBody"></tbody>
         </table>
@@ -157,7 +167,7 @@
       </div>
       <div>
         <h5>Measurement</h5>
-        <p>Each lane is a vertical strip (default half the lane pitch). Its mean profile is smoothed, the parent band is the uppermost strong peak (above about 37% editing a cleavage product is brighter than the parent), and the cleavage products are found at offsets shared by the lanes of the row, measured from each lane's own parent band, so tilted rows work; lanes of other amplicons in the same row are grouped by their band pattern. Click a peak on the lane profile to remove a band or to choose the parent and products by hand. Areas are summed above a baseline: by default a straight line between the valleys around each band, the way ImageJ Gel Analyzer is used by hand.</p>
+        <p>Each lane is a vertical strip (default 90% of the lane pitch). Its mean profile is smoothed, the parent band is the uppermost strong peak (above about 37% editing a cleavage product is brighter than the parent), and the cleavage products are found at offsets shared by the lanes of the row, measured from each lane's own parent band, so tilted rows work; lanes of other amplicons in the same row are grouped by their band pattern. Click a peak on the lane profile to remove a band or to choose the parent and products by hand. Areas are summed above a baseline: by default a straight line between the valleys around each band, the way ImageJ Gel Analyzer is used by hand.</p>
       </div>
       <div>
         <h5>Checks</h5>

@@ -156,6 +156,24 @@ test('the app in a browser', { skip: !chrome && 'no Chrome found (set CHROME_PAT
       assert.ok(nums.some(v => v != null && Math.round(v * 10) !== v * 10), "hundredths are kept, not the table's tenth");
     });
 
+    await t.test('every results column header explains itself, on screen and under the header', async () => {
+      const heads = await page.eval(`Array.from(document.querySelectorAll('.results thead th')).filter(th => th.textContent.trim()).map(th => th.querySelector('.th-info') ? th.querySelector('.th-info').textContent : '(no tip) ' + th.textContent)`);
+      assert.deepEqual(heads, ['Lane', 'Label', 'Parent', 'Cut 1', 'Cut 2', 'Fraction', '% edit', 'QC']);
+      for (let i = 0; i < heads.length; i++) {
+        const at = await page.eval(`(() => { const b = document.querySelectorAll('.th-info')[${i}]; b.scrollIntoView({ block: 'center' }); const q = b.getBoundingClientRect(); return [q.x + q.width / 2, q.y + q.height / 2]; })()`);
+        await page.click(at[0], at[1]);
+        const tip = await page.eval(`(() => { const b = document.querySelectorAll('.th-info')[${i}], t = b.nextElementSibling, q = t.getBoundingClientRect(), h = b.getBoundingClientRect();
+          return { shown: getComputedStyle(t).display !== 'none', text: t.textContent.length, left: q.left, right: q.right, below: q.top >= h.bottom - 1, width: innerWidth }; })()`);
+        assert.ok(tip.shown && tip.text > 40, `${heads[i]}: the tip opens with an explanation`);
+        assert.ok(tip.left >= 0 && tip.right <= tip.width && tip.below, `${heads[i]}: the tip is on screen under its header ${JSON.stringify(tip)}`);
+        // Escape unpins it; with the pointer and focus elsewhere it is gone.
+        await page.key('Escape', 27);
+        await page.eval('document.activeElement.blur()');
+        await page.mouse('mouseMoved', 1, 1);
+        assert.equal(await page.eval(`getComputedStyle(document.querySelectorAll('.th-info')[${i}].nextElementSibling).display`), 'none', `${heads[i]}: Escape closes the tip`);
+      }
+    });
+
     await t.test('removing a lane drops it from the table', async () => {
       await pick(lane);
       await page.eval(`document.getElementById('removeLane').click()`);
