@@ -32,7 +32,7 @@
 
   const DEFAULTS = Object.freeze({
     polarity: 'dark',      // 'dark' = dark bands on a light background, 'light' = the opposite
-    laneWidth: 0.5,        // measured strip width as a fraction of the lane pitch
+    laneWidth: 0.9,        // measured strip width as a fraction of the lane pitch
     smoothing: 1.5,        // Gaussian sigma (px) applied to lane profiles
     background: 'valley',  // 'valley' | 'blend' | 'envelope'
     blendK: 0.15,          // valley-depth scale for the 'blend' baseline
@@ -1040,18 +1040,22 @@
     let valleys;
     const manual = !!(q.lane.valleys && q.lane.valleys.length === bands.length + 1);
     const measured = b => b.kind === 0 || (b.kind > 0 && prods[b.kind - 1].found);   // not the place an undetected product was expected
+    const autoValleys = () => {
+      const firstGap = ys.length > 1 ? ys[1] - ys[0] : Math.max(6, Math.round(n * 0.15));
+      const v = [argmin(pm, ys[0] - firstGap, ys[0])];
+      for (let i = 0; i < ys.length - 1; i++) v.push(argmin(pm, ys[i], ys[i + 1]));
+      const lastGap = ys.length > 1 ? ys[ys.length - 1] - ys[ys.length - 2] : firstGap;
+      v.push(argmin(pm, ys[ys.length - 1], ys[ys.length - 1] + lastGap));
+      for (let i = 1; i < v.length; i++) if (v[i] < v[i - 1]) v[i] = v[i - 1];
+      return v;
+    };
     if (manual) {
       valleys = q.lane.valleys.map(v => Math.min(n - 1, Math.max(0, Math.round(v - r.y0)))).sort((a, b) => a - b);
       flags.push('manual band boundaries');
       if (bands.some((b, s) => measured(b) && !(valleys[s] < b.y && b.y < valleys[s + 1]))) flags.push('band boundary crosses a band');
     } else {
       if (q.lane.valleys) flags.push('manual band boundaries ignored: the number of bands changed');
-      const firstGap = ys.length > 1 ? ys[1] - ys[0] : Math.max(6, Math.round(n * 0.15));
-      valleys = [argmin(pm, ys[0] - firstGap, ys[0])];
-      for (let i = 0; i < ys.length - 1; i++) valleys.push(argmin(pm, ys[i], ys[i + 1]));
-      const lastGap = ys.length > 1 ? ys[ys.length - 1] - ys[ys.length - 2] : firstGap;
-      valleys.push(argmin(pm, ys[ys.length - 1], ys[ys.length - 1] + lastGap));
-      for (let i = 1; i < valleys.length; i++) if (valleys[i] < valleys[i - 1]) valleys[i] = valleys[i - 1];
+      valleys = autoValleys();
     }
 
     // A measured band is summed between its feet, not from boundary to boundary: a band on a smear
@@ -1059,14 +1063,19 @@
     // only bound how far a band may reach. Outside the feet the baseline follows the profile, so
     // the plot shows what is counted.
     const nodeAt = baselineNodeAt(pm, valleys, prm.background, prm.blendK);
-    const clampTo = (i, s) => Math.max(valleys[s], Math.min(valleys[s + 1], i));
-    const feet = bands.map((b, s) => measured(b)
-      ? [clampTo(footOf(pm, b.y, valleys[s], noise), s), clampTo(footOf(pm, b.y, valleys[s + 1], noise), s)]
-      : [valleys[s], valleys[s + 1]]);
+    const feetWithin = vs => bands.map((b, s) => {
+      if (!measured(b)) return [vs[s], vs[s + 1]];
+      const clampTo = i => Math.max(vs[s], Math.min(vs[s + 1], i));
+      return [clampTo(footOf(pm, b.y, vs[s], noise)), clampTo(footOf(pm, b.y, vs[s + 1], noise))];
+    });
+    const feet = feetWithin(valleys);
     const sP = bands.findIndex(b => b.kind === 0);
     let sLast = bands.length - 1;
     while (sLast > sP && !measured(bands[sLast])) sLast--;
     const first = feet[sP][0], last = feet[sLast][1];   // the measured range: the parent's upper foot to the last band's lower foot
+    // Whether the box cuts a band is a matter of the image and the box, not of hand-moved boundaries.
+    const autoFeet = manual ? feetWithin(autoValleys()) : feet;
+    const edgeFirst = autoFeet[sP][0], edgeLast = autoFeet[sLast][1];
     const baseline = new Float32Array(n).fill(NaN);
     const areas = peaks.map(() => 0);
     for (let s = 0; s < bands.length; s++) {
@@ -1131,9 +1140,9 @@
       // Pixel noise from curvature: a short box full of band flanks would inflate the slope-based estimate.
       // The edge level is read from the smoothed profile, so it is judged against that profile's own noise.
       const en = Math.max(1e-3, curvatureNoise(q.p)), enS = Math.max(1e-3, curvatureNoise(ps));
-      const topCut = first <= 1 && n > 4 && ps[3] - ps[0] > 3 * en && ps[0] - lo > Math.max(0.04 * hP, 3 * enS);
-      const bottomCut = last >= n - 2 && n > 4 && ps[n - 4] - ps[n - 1] > 3 * en && ps[n - 1] - lo > Math.max(0.04 * lastHeight, 3 * enS);
-      if (P <= 1 || (first <= 1 && ps[0] - lo > 0.2 * hP) || topCut || bottomCut || (last >= n - 2 && ps[n - 1] - lo > 0.5 * lastHeight + 3 * noise)) {
+      const topCut = edgeFirst <= 1 && n > 4 && ps[3] - ps[0] > 3 * en && ps[0] - lo > Math.max(0.04 * hP, 3 * enS);
+      const bottomCut = edgeLast >= n - 2 && n > 4 && ps[n - 4] - ps[n - 1] > 3 * en && ps[n - 1] - lo > Math.max(0.04 * lastHeight, 3 * enS);
+      if (P <= 1 || (edgeFirst <= 1 && ps[0] - lo > 0.2 * hP) || topCut || bottomCut || (edgeLast >= n - 2 && ps[n - 1] - lo > 0.5 * lastHeight + 3 * noise)) {
         flags.push('band cut by the box edge');
       } else if (P <= Math.max(3, 0.06 * n)) {
         flags.push('band at the top of the box: a well?');

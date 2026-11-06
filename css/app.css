@@ -64,6 +64,7 @@ a:hover { color: var(--color-accent-800); }
 .sec-hint { margin-left: auto; font-size: 12px; color: var(--muted); text-align: right; }
 .sec-title { margin-left: auto; font-family: var(--font-heading); font-size: 18px; }
 .results-head { margin-top: 14px; }
+.copy-btn { padding: 2px 10px; font-size: 13px; }
 
 .frame { padding: 10px; }
 .stage { position: relative; background: var(--color-surface); }

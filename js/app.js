@@ -3,13 +3,13 @@
   'use strict';
 
   const T = window.T7E1, TIFF = window.T7E1Tiff, SAMPLE = window.T7E1Sample, XLSX = window.T7EIXlsx;
-  const VERSION = '1.8.1';
-  const STORE = 't7eI.params.v1';
+  const VERSION = '1.9.0';
+  const STORE = 't7eI.params.v2';
   const $ = id => document.getElementById(id);
 
   const els = {
     fileName: $('fileName'), fileInput: $('fileInput'), loadBtn: $('loadBtn'), sampleBtn: $('sampleBtn'),
-    csvBtn: $('csvBtn'), xlsxBtn: $('xlsxBtn'), pngBtn: $('pngBtn'), bandMenu: $('bandMenu'),
+    csvBtn: $('csvBtn'), xlsxBtn: $('xlsxBtn'), pngBtn: $('pngBtn'), copyBtn: $('copyBtn'), bandMenu: $('bandMenu'),
     stage: document.querySelector('.stage'), img: $('imgCanvas'), ov: $('ovCanvas'), empty: $('emptyMsg'),
     rowsBar: $('rowsBar'), meta: $('imgMeta'),
     laneWidth: $('laneWidth'), laneWidthVal: $('laneWidthVal'), smoothing: $('smoothing'), smoothingVal: $('smoothingVal'),
@@ -31,7 +31,15 @@
 
   function loadParams() {
     let saved = {};
-    try { saved = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) { saved = {}; }
+    try {
+      const v2 = localStorage.getItem(STORE);
+      if (v2) saved = JSON.parse(v2) || {};
+      else {
+        // Settings saved before 1.9.0: 50% lane width was the old default, so it gives way to the new one.
+        saved = JSON.parse(localStorage.getItem('t7eI.params.v1') || '{}') || {};
+        if (saved.laneWidth === 0.5) delete saved.laneWidth;
+      }
+    } catch (e) { saved = {}; }
     return sanitize(saved);
   }
 
@@ -309,7 +317,7 @@
     renderTable();
     renderMeta();
     const has = !!state.result;
-    els.csvBtn.disabled = els.xlsxBtn.disabled = els.pngBtn.disabled = !has;
+    els.csvBtn.disabled = els.xlsxBtn.disabled = els.pngBtn.disabled = els.copyBtn.disabled = !has;
   }
 
   function renderParams() {
@@ -1122,7 +1130,6 @@
     const x = c.getContext('2d');
     x.fillStyle = '#ffffff'; x.fillRect(0, 0, c.width, c.height);
     x.drawImage(els.img, 0, 0);
-    const labs = labels();
     // Text with a halo in the gel's background tone stays readable on dark and light gels.
     const darkGel = state.params.polarity === 'light';
     const ink = darkGel ? '#ffffff' : '#000000', halo = darkGel ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)';
@@ -1130,17 +1137,12 @@
       x.lineJoin = 'round'; x.lineWidth = 4 * u; x.strokeStyle = halo; x.strokeText(text, cx, y);
       x.fillStyle = fill; x.fillText(text, cx, y);
     };
-    x.textAlign = 'center';
-    state.rows.forEach((row, ri) => state.result.rows[ri].lanes.forEach((r, li) => {
-      if (r.role === 'excluded') return;
-      const cx = (r.a + r.b) / 2;
-      x.font = `600 ${14 * u}px "Barlow Condensed", sans-serif`;
-      x.textBaseline = 'bottom';
-      label(labs[ri][li], cx, Math.max(16 * u, row.y0 - 4 * u), ink);
-      if (r.role === 'marker') return;
-      x.textBaseline = 'top';
-      x.font = `600 ${15 * u}px "Barlow Condensed", sans-serif`;
-      label(fmtPct(r.editing), cx, row.y1 + 4 * u, ink);   // the same tenth as the table
+    // Only the results, under each lane: no lane numbers above.
+    x.textAlign = 'center'; x.textBaseline = 'top';
+    x.font = `600 ${15 * u}px "Barlow Condensed", sans-serif`;
+    state.rows.forEach((row, ri) => state.result.rows[ri].lanes.forEach(r => {
+      if (r.role === 'excluded' || r.role === 'marker') return;
+      label(fmtPct(r.editing), (r.a + r.b) / 2, row.y1 + 4 * u, ink);   // the same tenth as the table
     }));
     const p = state.params;
     x.textAlign = 'left'; x.textBaseline = 'middle'; x.fillStyle = col.text;
@@ -1150,9 +1152,8 @@
     c.toBlob(b => download(b, baseName() + '-t7eI.png'), 'image/png');
   }
 
-  function exportXlsx() {
-    if (!state.result) return;
-    const p = state.params;
+  /** The results table of the XLSX and the clipboard: one row per lane, numbers as numbers, null where a lane has none. */
+  function resultRows() {
     const rows = [['Row', 'Lane', 'Label', 'Type', 'x (px)', 'Parent area', 'Cut 1 area', 'Cut 2 area', 'Fraction cleaved', '% editing', 'Flags']];
     lanesForExport().forEach(e => {
       const r = e.r, quant = r.role !== 'marker' && r.role !== 'excluded';
@@ -1161,6 +1162,13 @@
         quant ? num(r.areas[0], 2) : null, quant ? num(r.areas[1], 2) : null, quant ? num(r.areas[2], 2) : null,
         quant ? num(r.fc, 4) : null, quant ? num(r.editing, 2) : null, r.flags.join('; ')]);
     });
+    return rows;
+  }
+
+  function exportXlsx() {
+    if (!state.result) return;
+    const p = state.params;
+    const rows = resultRows();
     const settings = [['Setting', 'Value'],
       ['App', 'T7E1 Gel Analysis ' + VERSION], ['File', state.name], ['Exported', new Date().toISOString()],
       ['Formula', '% editing = 100*(1-sqrt(1-f)), f = ' + fText() + ' (Guschin 2010, NEB)'],
@@ -1174,6 +1182,44 @@
     download(new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), baseName() + '-t7eI.xlsx');
   }
 
+  /**
+   * Copy the results table for Excel, with every decimal the XLSX has. Excel takes the HTML copy:
+   * numbers ride in x:num with a point, so they paste as numbers whatever its decimal separator,
+   * and text cells are marked as text so a label such as "-5" or "1-2" is not read as a formula
+   * or a date. Other programs take the tab-separated copy, written with the browser's decimal separator.
+   */
+  function copyResults() {
+    if (!state.result) return;
+    const rows = resultRows(), n = rows.length - 1;
+    let dec = '.';
+    try { dec = new Intl.NumberFormat().formatToParts(1.5).find(q => q.type === 'decimal').value; } catch (e) { /* keep the point */ }
+    const clean = s => String(s).replace(/[\t\r\n]+/g, ' ');
+    const esc = s => clean(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const text = rows.map(r => r.map(v => (v == null ? '' : typeof v === 'number' ? String(v).replace('.', dec) : clean(v))).join('\t')).join('\r\n') + '\r\n';
+    const html = '<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body><table>' +
+      rows.map((r, i) => '<tr>' + r.map(v => {
+        if (v == null) return '<td></td>';
+        if (typeof v === 'number') return `<td x:num="${v}">${String(v).replace('.', dec)}</td>`;
+        return (i ? '<td style="mso-number-format:\'\\@\'">' : '<td>') + esc(v) + '</td>';
+      }).join('') + '</tr>').join('') + '</table></body></html>';
+    const copied = () => {
+      setMessage('Copied ' + n + ' lane' + (n === 1 ? '' : 's') + ' with a header row. Paste into Excel.');
+      els.copyBtn.textContent = 'Copied';
+      clearTimeout(copyResults.timer);
+      copyResults.timer = setTimeout(() => { els.copyBtn.textContent = 'Copy results'; }, 1500);
+    };
+    // A copy event writes the HTML as it is; the async clipboard may strip Excel's attributes.
+    let ok = false;
+    const onCopy = e => { e.clipboardData.setData('text/html', html); e.clipboardData.setData('text/plain', text); e.preventDefault(); ok = true; };
+    document.addEventListener('copy', onCopy);
+    try { document.execCommand('copy'); } catch (e) { ok = false; }
+    document.removeEventListener('copy', onCopy);
+    if (ok) return copied();
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(copied, () => setMessage('The browser did not allow copying. Use Export XLSX instead.'));
+    else setMessage('The browser did not allow copying. Use Export XLSX instead.');
+  }
+
+  els.copyBtn.addEventListener('click', copyResults);
   els.csvBtn.addEventListener('click', exportCsv);
   els.xlsxBtn.addEventListener('click', exportXlsx);
   els.pngBtn.addEventListener('click', exportPng);

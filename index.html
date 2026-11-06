@@ -82,7 +82,7 @@
           </div>
         </div>
         <div class="field">
-          <div class="field-head"><label for="laneWidth">Lane width · <span id="laneWidthVal"></span>% of pitch</label><button type="button" class="info" aria-label="About lane width" aria-describedby="tip-laneWidth"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-laneWidth">Width of the strip measured in each lane, as a share of the distance between neighbouring lanes. The default 50% covers the band centre without touching the next lane. Wider takes in band edges and more background; narrower is noisier. It usually moves results by less than one point.</span></div>
+          <div class="field-head"><label for="laneWidth">Lane width · <span id="laneWidthVal"></span>% of pitch</label><button type="button" class="info" aria-label="About lane width" aria-describedby="tip-laneWidth"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="16" y2="12"/><line x1="12" x2="12.01" y1="8" y2="8"/></svg></button><span class="tip" role="tooltip" id="tip-laneWidth">Width of the strip measured in each lane, as a share of the distance between neighbouring lanes. The default 90% takes in the whole band, edges included. Narrower keeps out a neighbouring lane when lanes are close or bands are wide, and is noisier. Changing it can move results by a few points.</span></div>
           <input type="range" id="laneWidth" min="20" max="90" step="5" class="range">
         </div>
         <div class="field">
@@ -132,6 +132,7 @@
         <span class="sec-num">03</span>
         <h3>Results</h3>
         <span class="sec-hint" id="resHint"></span>
+        <button class="btn btn-secondary copy-btn" id="copyBtn" type="button" title="Copy the results table for pasting into Excel, with full decimals">Copy results</button>
       </div>
       <div class="table-wrap">
         <table class="table results">

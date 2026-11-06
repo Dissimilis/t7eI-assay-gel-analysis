@@ -136,6 +136,26 @@ test('the app in a browser', { skip: !chrome && 'no Chrome found (set CHROME_PAT
       assert.deepEqual(png.head, [0x89, 0x50, 0x4e, 0x47], 'PNG signature');
     });
 
+    await t.test('Copy results puts the table on the clipboard, numbers with every decimal', async () => {
+      // Read what the copy writes (on window: after the app's own listener); a real click, since browsers copy only on a user gesture.
+      await page.eval(`(() => { window.__copy = null; window.addEventListener('copy', e => { window.__copy = { html: e.clipboardData.getData('text/html'), text: e.clipboardData.getData('text/plain') }; }); })()`);
+      const at = await page.eval(`(() => { const b = document.getElementById('copyBtn'); b.scrollIntoView({ block: 'center' }); const q = b.getBoundingClientRect(); return [q.x + q.width / 2, q.y + q.height / 2]; })()`);
+      await page.click(at[0], at[1]);
+      await page.sleep(200);
+      const got = await page.eval('window.__copy');
+      assert.ok(got && got.html && got.text, 'the copy wrote HTML and text');
+      assert.match(await message(), /^.*Copied \d+ lanes/, 'the app says it copied');
+      const lines = got.text.trim().split('\r\n');
+      assert.equal(lines.length, before.length + 1, 'a header and one line per lane');
+      assert.equal(lines[0].split('\t')[9], '% editing');
+      // Excel reads x:num, a plain number with a point, whatever its own decimal separator.
+      const nums = [...got.html.matchAll(/<tr>(.*?)<\/tr>/g)].slice(1).map(m => { const v = [...m[1].matchAll(/<td( x:num="([^"]*)")?[^>]*>/g)][9]; return v && v[2] != null ? Number(v[2]) : null; });
+      const shown = await page.eval(`Array.from(document.querySelectorAll('#resBody tr')).map(tr => tr.querySelector('td.ed-val').textContent)`);
+      assert.equal(nums.length, shown.length);
+      nums.forEach((v, i) => assert.ok(v == null ? shown[i] === '—' : Math.abs(v - Number(shown[i])) <= 0.051, `copied % editing, lane ${i}: ${v} vs ${shown[i]}`));
+      assert.ok(nums.some(v => v != null && Math.round(v * 10) !== v * 10), "hundredths are kept, not the table's tenth");
+    });
+
     await t.test('removing a lane drops it from the table', async () => {
       await pick(lane);
       await page.eval(`document.getElementById('removeLane').click()`);

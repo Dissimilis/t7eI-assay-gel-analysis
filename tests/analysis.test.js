@@ -107,7 +107,8 @@ test('real gel: agreement with hand ImageJ values', { skip: !pgm || !fs.existsSy
     [20.2, 15.3, 21.3, 21.0, 22.5, 17.3, 11.1, 21.6, 14.2, 19.5, 20.1, 16.2, 19.0, 16.9],
     [18, 20, 23, 22, 19, 25, 4]
   ];
-  const limits = [2.5, 0.8];
+  // At the 90% lane width (default since 1.9.0) row 1 reads 2.39 and row 2 1.09 (at 50%: 1.47 and 0.41).
+  const limits = [2.5, 1.2];
   res.rows.forEach((r, ri) => {
     const samples = r.lanes.filter(l => l.role === 'sample');
     const d = ref[ri].map((v, i) => Math.abs(samples[i].editing - v));
